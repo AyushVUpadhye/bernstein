@@ -85,6 +85,18 @@ _CLAIMS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("selectable", _SELECTABLE_CLAIM_RE),
 )
 
+# "CLI coding agents work out of the box (Claude Code, Codex, Gemini CLI, and 52 more)"
+_INTRO_CLAIM_RE = re.compile(r"Claude Code, Codex, Gemini CLI, and (\d+) more\)")
+# "**Broad and local.** 52 selectable CLI agent adapters plus a generic `--prompt` wrapper"
+_AT_A_GLANCE_CLAIM_RE = re.compile(r"(\d+) selectable CLI agent adapters plus a generic")
+
+# These two restate the "supported agents" section's selectable count earlier
+# on the page (the intro paragraph and the at-a-glance bullet) - the exact
+# claims issue #6060 was filed against. They are intentionally not added to
+# ``_CLAIMS``: that tuple also drives the translated-page check, which looks
+# for claims inside the localized "supported agents" section, and these two
+# live outside it.
+
 #: A standalone integer. ``\b`` is unusable here: Python's word boundary is
 #: Unicode-aware and a Bengali letter is a word character, so ``\b52\b`` does
 #: not match ``52``-plus-counter-suffix in ``README.bn.md``. Lookarounds on
@@ -164,6 +176,26 @@ def test_readme_selectable_adapter_count_matches_the_registry() -> None:
     from bernstein.adapters.registry import selectable_adapter_names
 
     assert _claimed(_SELECTABLE_CLAIM_RE) == len(selectable_adapter_names())
+
+
+def test_readme_intro_adapter_count_matches_the_registry() -> None:
+    """The intro paragraph's "N more" count equals the registry's selectable set (#6060).
+
+    The intro and the at-a-glance bullet both restate the "supported agents"
+    section's selectable count elsewhere on the page. Nothing checked either
+    copy against the registry, so they could drift independently of the
+    section-level guards above.
+    """
+    from bernstein.adapters.registry import selectable_adapter_names
+
+    assert _claimed(_INTRO_CLAIM_RE) == len(selectable_adapter_names())
+
+
+def test_readme_at_a_glance_adapter_count_matches_the_registry() -> None:
+    """The at-a-glance bullet's selectable-adapter count equals the registry's selectable set (#6060)."""
+    from bernstein.adapters.registry import selectable_adapter_names
+
+    assert _claimed(_AT_A_GLANCE_CLAIM_RE) == len(selectable_adapter_names())
 
 
 def test_install_matrix_is_a_subset_claim_not_a_full_one() -> None:
