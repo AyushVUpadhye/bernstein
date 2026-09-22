@@ -15,7 +15,7 @@
 > *"To achieve great things, two things are needed: a plan and not quite enough time."* - [attributed to](https://quoteinvestigator.com/2020/08/19/plan-time/) Leonard Bernstein
 
 ### otwartoźródłowa warstwa governance dla agentów AI
-<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:13f9153b6acd" -->
+<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:1b5d22a308f2" -->
 
 [![CI](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml/badge.svg)](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/bernstein)](https://pypi.org/project/bernstein/)
@@ -41,7 +41,7 @@
 Bernstein to otwartoźródłowa warstwa governance dla agentów AI. Działa na policy as code: ty piszesz politykę - kto co może robić, co wymaga zatwierdzenia, co musi zostać zapisane - a Bernstein ją egzekwuje i tworzy weryfikowalny zapis. Deterministyczny scheduler - bez modelu w pętli koordynacji - uruchamia agentów równolegle, filtruje ich wyniki bramkami i zapisuje każdy krok, więc przebieg można zweryfikować po fakcie, offline, wyłącznie z artefaktów. Agenci CLI do kodu działają od ręki (Claude Code, Codex, Gemini CLI i 52+ innych), a ta sama warstwa governuje dowolne obciążenie agentowe: rezultatem może być diff, raport badawczy, dataset albo pakiet dowodów audytowych. Profil instalacji air-gap w zestawie. Apache-2.0.
 
 ### w skrócie
-<!-- l10n: en="at a glance" hash="sha256:5ebd34b9459d" -->
+<!-- l10n: en="at a glance" hash="sha256:1ac9088be547" -->
 
 Cztery cechy wyróżniają ten projekt; reszta to szczegóły.
 

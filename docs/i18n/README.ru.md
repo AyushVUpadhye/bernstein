@@ -15,7 +15,7 @@
 > *"To achieve great things, two things are needed: a plan and not quite enough time."* - [attributed to](https://quoteinvestigator.com/2020/08/19/plan-time/) Leonard Bernstein
 
 ### опенсорсный governance-слой для AI-агентов
-<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:13f9153b6acd" -->
+<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:1b5d22a308f2" -->
 
 [![CI](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml/badge.svg)](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/bernstein)](https://pypi.org/project/bernstein/)
@@ -41,7 +41,7 @@
 Bernstein — опенсорсный governance-слой для AI-агентов. Работает на policy as code: ты описываешь политику — кто что может делать, что требует подтверждения, что должно фиксироваться — а Bernstein применяет её и формирует проверяемую запись. Детерминированный планировщик — в цикле координации нет модели — гоняет агентов параллельно, проверяет результат на гейтах и записывает каждый шаг, так что прогон можно верифицировать постфактум, офлайн, по одним лишь артефактам. CLI-агенты для кода работают из коробки (Claude Code, Codex, Gemini CLI и ещё 52+), и тот же слой говернит любую агентную нагрузку: результатом может быть дифф, исследовательский отчёт, датасет или пакет аудиторских свидетельств. Профиль установки для air-gap в комплекте. Apache-2.0.
 
 ### коротко
-<!-- l10n: en="at a glance" hash="sha256:5ebd34b9459d" -->
+<!-- l10n: en="at a glance" hash="sha256:1ac9088be547" -->
 
 Отличают его четыре вещи; всё остальное — детали.
 

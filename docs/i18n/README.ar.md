@@ -15,7 +15,7 @@
 > *"To achieve great things, two things are needed: a plan and not quite enough time."* - [attributed to](https://quoteinvestigator.com/2020/08/19/plan-time/) Leonard Bernstein
 
 ### طبقة الحوكمة مفتوحة المصدر لوكلاء الذكاء الاصطناعي
-<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:13f9153b6acd" -->
+<!-- l10n: en="the open-source governance layer for AI agents" hash="sha256:1b5d22a308f2" -->
 
 [![CI](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml/badge.svg)](https://github.com/sipyourdrink-ltd/bernstein/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/bernstein)](https://pypi.org/project/bernstein/)
@@ -41,7 +41,7 @@
 Bernstein هو طبقة الحوكمة مفتوحة المصدر لوكلاء الذكاء الاصطناعي. يعمل بمبدأ policy as code: أنت تكتب السياسة - من يمكنه فعل ماذا، وما الذي يحتاج موافقة، وما الذي يجب تسجيله - ويفرضها Bernstein وينتج السجل القابل للتحقق. مجدوِل حتمي - لا نموذج في حلقة التنسيق - يشغّل الوكلاء بالتوازي، ويفحص ما ينتجونه عبر بوابات، ويسجّل كل خطوة، بحيث يمكن التحقق من التشغيل لاحقًا، دون اتصال، من المخرجات وحدها. وكلاء البرمجة عبر سطر الأوامر يعملون فورًا (Claude Code وCodex وGemini CLI وأكثر من 52 غيرها)، والطبقة نفسها تحكم أي حمل وكيلي: يمكن أن يكون الناتج diff أو تقرير بحث أو مجموعة بيانات أو حزمة أدلة تدقيق. ملف تعريف تثبيت air-gap مضمّن. Apache-2.0.
 
 ### لمحة سريعة
-<!-- l10n: en="at a glance" hash="sha256:5ebd34b9459d" -->
+<!-- l10n: en="at a glance" hash="sha256:1ac9088be547" -->
 
 أربعة أمور تميزه عن غيره؛ وكل ما بعد ذلك تفاصيل.
 
