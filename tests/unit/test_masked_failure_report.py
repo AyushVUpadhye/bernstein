@@ -12,13 +12,26 @@ the third attempt reports identically to one that closed on its first --
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from bernstein.core.persistence.runs_report import (
     FIRST_RETRY_ATTEMPT,
     FinishedRun,
     RunOutcome,
     masked_failures,
+    task_retry_sequences,
 )
+from bernstein.core.persistence.work_ledger import (
+    KIND_TASK_COMPLETED,
+    KIND_TASK_FAILED,
+    KIND_TASK_SCHEDULED,
+    KIND_TASK_STARTED,
+    WorkLedger,
+    run_ledger_dir,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _run(
@@ -183,3 +196,127 @@ def test_the_json_shape_mirrors_a_finished_run_row() -> None:
     assert document["rows"][0]["outcome"] == "pr-opened"
     assert document["by_owner"]["builder-1"] == {"masked": 1, "finished": 1, "share": 1.0}
     json.dumps(document)  # serialises without a custom encoder
+
+
+# ---------------------------------------------------------------------------
+# Task-level retry sequences (#5106 slice 1)
+# ---------------------------------------------------------------------------
+#
+# `masked_failures` above reports at run granularity, from the *sum* of every
+# task's attempts in the run -- it cannot say which task actually failed and
+# recovered. These tests exercise `task_retry_sequences`, which reads the raw
+# ledger entries directly and reports per `task_id`, the natural key for "the
+# same logical task retried" within one ledger root.
+
+
+def _ledger(tmp_path: Path, run_id: str) -> Path:
+    return run_ledger_dir(tmp_path / ".sdd", run_id)
+
+
+def _append_task(tmp_path: Path, run_id: str, task_id: str, kinds: list[str]) -> None:
+    """Append one task's kind sequence to *run_id*'s ledger, opening/closing per call.
+
+    Reopening per call (rather than holding one writer across a whole test)
+    keeps each test's ledger construction linear and easy to read, and
+    mirrors how independent processes would actually append over a run's
+    lifetime.
+    """
+    ledger = WorkLedger.open(_ledger(tmp_path, run_id))
+    for kind in kinds:
+        ledger.append(kind=kind, task_id=task_id)
+    ledger.close()
+
+
+def test_failed_then_completed_is_reported(tmp_path: Path) -> None:
+    """The load-bearing case: a task that failed once and then succeeded."""
+    _append_task(
+        tmp_path,
+        "run-a",
+        "t1",
+        [KIND_TASK_SCHEDULED, KIND_TASK_STARTED, KIND_TASK_FAILED, KIND_TASK_STARTED, KIND_TASK_COMPLETED],
+    )
+
+    sequences = task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a")
+
+    (row,) = sequences
+    assert row.run_id == "run-a"
+    assert row.task_id == "t1"
+    assert row.failed_attempts == 1
+    assert row.succeeded is True
+
+
+def test_succeeded_first_try_is_excluded(tmp_path: Path) -> None:
+    _append_task(tmp_path, "run-a", "t1", [KIND_TASK_SCHEDULED, KIND_TASK_STARTED, KIND_TASK_COMPLETED])
+
+    assert task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a") == []
+
+
+def test_failed_only_is_excluded(tmp_path: Path) -> None:
+    """It is already visible as a failed task -- there is no success to mask it."""
+    _append_task(tmp_path, "run-a", "t1", [KIND_TASK_SCHEDULED, KIND_TASK_STARTED, KIND_TASK_FAILED])
+
+    assert task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a") == []
+
+
+def test_three_failed_attempts_before_success(tmp_path: Path) -> None:
+    _append_task(
+        tmp_path,
+        "run-a",
+        "t1",
+        [
+            KIND_TASK_SCHEDULED,
+            KIND_TASK_STARTED,
+            KIND_TASK_FAILED,
+            KIND_TASK_STARTED,
+            KIND_TASK_FAILED,
+            KIND_TASK_STARTED,
+            KIND_TASK_FAILED,
+            KIND_TASK_STARTED,
+            KIND_TASK_COMPLETED,
+        ],
+    )
+
+    (row,) = task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a")
+    assert row.failed_attempts == 3
+
+
+def test_output_is_deterministic_over_the_same_ledger(tmp_path: Path) -> None:
+    _append_task(
+        tmp_path, "run-a", "t1", [KIND_TASK_STARTED, KIND_TASK_FAILED, KIND_TASK_STARTED, KIND_TASK_COMPLETED]
+    )
+    _append_task(tmp_path, "run-a", "t2", [KIND_TASK_STARTED, KIND_TASK_COMPLETED])
+
+    ledger_dir = _ledger(tmp_path, "run-a")
+    first = [row.to_dict() for row in task_retry_sequences(ledger_dir, run_id="run-a")]
+    second = [row.to_dict() for row in task_retry_sequences(ledger_dir, run_id="run-a")]
+    assert first == second
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+def test_only_the_retried_task_is_reported_alongside_a_clean_one(tmp_path: Path) -> None:
+    """Two task ids in one ledger root -- grouping is per task id, not per run."""
+    _append_task(
+        tmp_path, "run-a", "t1", [KIND_TASK_STARTED, KIND_TASK_FAILED, KIND_TASK_STARTED, KIND_TASK_COMPLETED]
+    )
+    _append_task(tmp_path, "run-a", "t2", [KIND_TASK_STARTED, KIND_TASK_COMPLETED])
+
+    sequences = task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a")
+
+    assert [row.task_id for row in sequences] == ["t1"]
+
+
+def test_the_same_task_id_in_different_ledger_roots_is_never_merged(tmp_path: Path) -> None:
+    """`task_id` is only unique within one ledger root -- two runs reusing
+    the same task id string are two independent sequences, not one merged
+    history."""
+    _append_task(
+        tmp_path, "run-a", "t1", [KIND_TASK_STARTED, KIND_TASK_FAILED, KIND_TASK_STARTED, KIND_TASK_COMPLETED]
+    )
+    _append_task(tmp_path, "run-b", "t1", [KIND_TASK_STARTED, KIND_TASK_COMPLETED])
+
+    run_a = task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a")
+    run_b = task_retry_sequences(_ledger(tmp_path, "run-b"), run_id="run-b")
+
+    assert [row.task_id for row in run_a] == ["t1"]
+    assert run_a[0].failed_attempts == 1
+    assert run_b == []
