@@ -170,23 +170,30 @@ class TestYamlEmission:
 
 
 class TestIncidentEvalGate:
-    def test_no_cases_passes(self, tmp_path: Path) -> None:
-        passed, _detail, counts = run_incident_eval_gate(tmp_path)
-        assert passed is True
+    def test_no_cases_skips(self, tmp_path: Path) -> None:
+        """No corpus is "nothing to check", not "checked, found nothing
+        wrong" -- those are different claims for an offline audit receipt
+        to make (#6165 review)."""
+        status, _detail, counts = run_incident_eval_gate(tmp_path)
+        assert status == "skipped"
         assert counts == {"P0": 0, "P1": 0, "P2": 0}
 
-    def test_p0_without_proof_blocks(self, tmp_path: Path) -> None:
+    def test_p0_without_proof_is_inconclusive(self, tmp_path: Path) -> None:
+        """A P0 case with no proof marker means the harness never
+        evaluated it -- that is ``inconclusive``, not ``fail`` (#6165
+        review): ``fail`` would assert the case ran and regressed, which
+        never happened."""
         _seed_dlq(tmp_path, reason="prompt_injection")
         IncidentSynthesizer(tmp_path).sync()
-        passed, detail, counts = run_incident_eval_gate(tmp_path)
-        assert passed is False
+        status, detail, counts = run_incident_eval_gate(tmp_path)
+        assert status == "inconclusive"
         assert "P0" in detail or counts["P0"] >= 1
 
     def test_p1_only_warns(self, tmp_path: Path) -> None:
         _seed_dlq(tmp_path, reason="token_runaway")
         IncidentSynthesizer(tmp_path).sync()
-        passed, _detail, counts = run_incident_eval_gate(tmp_path)
-        assert passed is True
+        status, _detail, counts = run_incident_eval_gate(tmp_path)
+        assert status == "pass"
         assert counts["P1"] >= 1
 
     def test_workdir_defaults_to_run_dir_when_omitted(self, tmp_path: Path) -> None:
@@ -196,15 +203,15 @@ class TestIncidentEvalGate:
         """
         _seed_dlq(tmp_path, reason="prompt_injection")
         IncidentSynthesizer(tmp_path).sync()
-        passed, _detail, _counts = run_incident_eval_gate(tmp_path)
-        assert passed is False
+        status, _detail, _counts = run_incident_eval_gate(tmp_path)
+        assert status == "inconclusive"
 
         results_dir = tmp_path / ".sdd" / "eval" / "incident_results"
         results_dir.mkdir(parents=True)
         case_stem = next((tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents").glob("inc-*.yaml")).stem
         (results_dir / f"{case_stem}.json").write_text("{}", encoding="utf-8")
-        passed, _detail, _counts = run_incident_eval_gate(tmp_path)
-        assert passed is True
+        status, _detail, _counts = run_incident_eval_gate(tmp_path)
+        assert status == "pass"
 
     def test_proof_resolved_from_workdir_not_run_dir(self, tmp_path: Path) -> None:
         """H1 (#6165 review): the incident corpus lives under ``run_dir``,
@@ -224,15 +231,15 @@ class TestIncidentEvalGate:
         run_dir_results = run_dir / ".sdd" / "eval" / "incident_results"
         run_dir_results.mkdir(parents=True)
         (run_dir_results / f"{case_stem}.json").write_text("", encoding="utf-8")
-        passed, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
-        assert passed is False
+        status, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
+        assert status == "inconclusive"
 
         # The same case passes once real proof exists under the trusted workdir.
         workdir_results = workdir / ".sdd" / "eval" / "incident_results"
         workdir_results.mkdir(parents=True)
         (workdir_results / f"{case_stem}.json").write_text("{}", encoding="utf-8")
-        passed, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
-        assert passed is True
+        status, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
+        assert status == "pass"
 
 
 # ---------------------------------------------------------------------------

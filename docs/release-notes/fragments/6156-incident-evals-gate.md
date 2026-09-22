@@ -23,6 +23,12 @@ Hardening on top of the dispatch fix (#6165 review):
 - An unreadable or non-UTF-8 incident case file no longer crashes the
   gate pipeline; the gate now returns the repository's `inconclusive`
   verdict instead.
+- A P0 case with no proof marker now reports `inconclusive` rather than
+  `fail`: the harness never evaluated it, so the gate cannot honestly claim
+  a regression ran and was observed. A missing incident corpus now reports
+  `skipped` rather than `pass`, so a repository with nothing to check does
+  not read the same as one that checked and found no regressions. Neither
+  change weakens `blocked` at a required gate.
 - `incident_evals` is opt-in only: it has no `QualityGatesConfig` flag and
   is not part of the default pipeline. See
   [Incident-to-eval synthesis](../../eval/incident-synthesis.md) for how to

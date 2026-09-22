@@ -1008,11 +1008,21 @@ class GateRunner:
         must come from ``self._workdir`` (the runner/project's trusted
         ``.sdd`` root) - never from ``run_dir``, which is untracked state
         the agent under review controls (#6165 review, H1).
+
+        A P0 case with no proof marker is ``inconclusive``, not ``fail``:
+        the harness never evaluated it, so the gate cannot honestly claim a
+        regression ran and was observed - only that it has no evidence
+        either way (#6165 review, #4181's convention). ``blocked`` is
+        unaffected: at a required gate it is still set, same as ``fail``
+        would set it. A missing incident corpus is ``skipped``, not
+        ``pass`` - "nothing to check" and "checked, found nothing wrong"
+        are different claims, and an offline audit receipt needs to tell
+        them apart (#6165 review).
         """
         from bernstein.eval.incident_synthesizer import run_incident_eval_gate
 
         try:
-            passed, detail, counts = run_incident_eval_gate(run_dir, self._workdir)
+            status, detail, counts = run_incident_eval_gate(run_dir, self._workdir)
         except Exception as exc:
             # The evaluator died before producing a verdict (e.g. a case
             # file that isn't valid UTF-8). Neither "pass" (a bypass) nor
@@ -1032,11 +1042,25 @@ class GateRunner:
                 metadata={},
                 reason="runner-died-before-output",
             )
+        if status == "skipped":
+            return self._skipped(step, detail)
+        if status == "inconclusive":
+            return GateResult(
+                name=step.name,
+                status="inconclusive",
+                required=step.required,
+                blocked=step.required,
+                cached=False,
+                duration_ms=0,
+                details=detail,
+                metadata=dict(counts),
+                reason="evidence-missing",
+            )
         return GateResult(
             name=step.name,
-            status="pass" if passed else "fail",
+            status="pass",
             required=step.required,
-            blocked=step.required and not passed,
+            blocked=False,
             cached=False,
             duration_ms=0,
             details=detail,

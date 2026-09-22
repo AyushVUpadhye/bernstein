@@ -499,10 +499,28 @@ class IncidentSynthesizer:
 # ---------------------------------------------------------------------------
 
 
-def run_incident_eval_gate(run_dir: Path, workdir: Path | None = None) -> tuple[bool, str, dict[str, int]]:
+#: Closed set of verdicts :func:`run_incident_eval_gate` returns. Not the
+#: gate's full ``GateStatus`` vocabulary -- this function only ever finds
+#: itself in three situations, and each one has a distinct, non-overlapping
+#: meaning:
+#:
+#: - ``"pass"``: every P0 case (if any) has a trusted proof marker.
+#: - ``"skipped"``: there is no incident corpus to evaluate at all. This is
+#:   not the same claim as "pass" -- a repository with no
+#:   ``src/bernstein/eval/cases/incidents/`` was never checked, so its
+#:   report should not read as "no P0 regressions" (#6165 review).
+#: - ``"inconclusive"``: at least one P0 case has no proof marker. The
+#:   harness could not evaluate it -- that is a different claim from "it
+#:   ran and regressed", which is what ``"fail"`` would assert (#6165
+#:   review, matching the #4181 convention this file's caller already
+#:   applies to its own evaluator-crashed branch).
+_GateVerdict = Literal["pass", "skipped", "inconclusive"]
+
+
+def run_incident_eval_gate(run_dir: Path, workdir: Path | None = None) -> tuple[_GateVerdict, str, dict[str, int]]:
     """Run all P0 incident eval cases as a blocking quality gate.
 
-    P1 / P2 cases are surfaced as warnings only.
+    P1 / P2 cases are counted but never affect the verdict.
 
     Args:
         run_dir: The governed agent worktree. The incident-case corpus
@@ -521,33 +539,36 @@ def run_incident_eval_gate(run_dir: Path, workdir: Path | None = None) -> tuple[
     come from the runner's own trusted root, never from the corpus root.
 
     Returns:
-        ``(passed, detail, counts)``. ``passed`` is False when any P0
-        case has no candidate solution wired up yet - i.e. the case is
-        present but the harness cannot prove regression status. The gate
-        fails closed: missing harness data on a P0 incident blocks merge.
+        ``(status, detail, counts)``. See :data:`_GateVerdict` for what each
+        status means. The gate fails closed: missing harness data on a P0
+        incident blocks merge (``inconclusive`` still sets ``blocked`` at a
+        required gate, same as ``fail`` would) -- it just no longer claims
+        the case ran and regressed when what actually happened is that
+        nobody has wired up proof yet.
     """
     trusted_root = workdir if workdir is not None else run_dir
     cases_dir = run_dir / "src" / "bernstein" / "eval" / "cases" / "incidents"
     counts = {"P0": 0, "P1": 0, "P2": 0}
     if not cases_dir.is_dir():
-        return True, "no incident eval cases", counts
+        return "skipped", "no incident eval cases", counts
 
-    p0_failed: list[str] = []
+    p0_missing_proof: list[str] = []
     for path in sorted(cases_dir.glob("inc-*.yaml")):
         sev = _severity_from_yaml(path)
         if sev in counts:
             counts[sev] += 1
-        # Without a wired harness we treat absence-of-pass as fail for
-        # P0 only. P1/P2 are warn-only per the ticket.
+        # Without a wired harness we cannot evaluate a P0 case at all, so
+        # its absence of proof is inconclusive, not a measured regression.
         if sev == "P0":
             results_path = trusted_root / ".sdd" / "eval" / "incident_results" / f"{path.stem}.json"
             if not results_path.is_file():
-                p0_failed.append(path.stem)
+                p0_missing_proof.append(path.stem)
 
-    if p0_failed:
-        return False, f"P0 incident regression(s) without proof: {', '.join(p0_failed[:5])}", counts
+    if p0_missing_proof:
+        detail = f"P0 incident regression(s) without proof: {', '.join(p0_missing_proof[:5])}"
+        return "inconclusive", detail, counts
     summary = f"P0={counts['P0']} P1={counts['P1']} P2={counts['P2']}"
-    return True, summary, counts
+    return "pass", summary, counts
 
 
 # ---------------------------------------------------------------------------

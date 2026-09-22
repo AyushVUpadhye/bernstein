@@ -101,12 +101,18 @@ checks whether a corresponding proof-of-regression-run marker exists at
 <runner/project workdir>/.sdd/eval/incident_results/<case-id>.json
 ```
 
-A missing marker for any P0 case fails the gate and blocks merge (the gate
-only checks *presence* of the file - the file's own harness is responsible
-for writing real evaluation output there, never an empty placeholder). P1
-and P2 cases are counted in the gate's `metadata` (`{"P0": n, "P1": n,
-"P2": n}`) but do not affect the pass/fail verdict; the current
-implementation does not emit a separate warning status for them.
+A missing marker for any P0 case blocks merge at a required gate, but the
+status it reports is `inconclusive`, not `fail`: the harness never
+evaluated the case, so the gate cannot honestly claim a regression ran and
+was observed - only that it has no evidence either way. `blocked` behaves
+identically to `fail` at a required gate; only the verdict label and the
+`reason` (`evidence-missing`) differ, so an offline audit receipt can tell
+"no evidence" apart from "measured and failed". A repository with no
+incident corpus at all reports `skipped`, not `pass`, for the same reason:
+"nothing to check" and "checked, found nothing wrong" are different claims.
+P1 and P2 cases are counted in the gate's `metadata` (`{"P0": n, "P1": n,
+"P2": n}`) but never affect the verdict; the current implementation does
+not emit a separate warning status for them.
 
 Two directories matter and they are **not** the same thing:
 

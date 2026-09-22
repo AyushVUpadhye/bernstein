@@ -478,7 +478,9 @@ def test_incident_evals_gate_is_dispatchable(tmp_path: Path) -> None:
     (already shipped in ``eval/incident_synthesizer.py``) with an empty
     ``tmp_path``, which has no ``src/bernstein/eval/cases/incidents``
     directory -- a fast, filesystem-only "no cases" pass, no subprocess or
-    network involved.
+    network involved. A missing corpus is ``skipped`` rather than ``pass``
+    (#6165 review): "nothing to check" and "checked, found nothing wrong"
+    are different claims for a report to make.
     """
     config = QualityGatesConfig(
         pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
@@ -491,7 +493,7 @@ def test_incident_evals_gate_is_dispatchable(tmp_path: Path) -> None:
 
     assert report.gates_run == ["incident_evals"]
     (result,) = report.results
-    assert result.status == "pass"
+    assert result.status == "skipped"
     assert not result.blocked
 
 
@@ -531,6 +533,12 @@ def test_incident_evals_gate_blocks_p0_case_without_results(tmp_path: Path) -> N
     always-on gate (#6165 review) -- this is the behaviour the docstring's
     "fails closed: missing harness data on a P0 incident blocks merge"
     describes, exercised for real rather than only dispatched to.
+
+    The status is ``inconclusive``, not ``fail`` (#6165 review, second
+    pass): the harness never evaluated this case, so the gate cannot
+    honestly claim it ran and regressed -- only that it has no evidence.
+    ``blocked`` is unaffected: a required gate still blocks on
+    ``inconclusive``, same as it would on ``fail``.
     """
     _write_p0_incident_case(tmp_path)
     config = QualityGatesConfig(
@@ -543,8 +551,9 @@ def test_incident_evals_gate_blocks_p0_case_without_results(tmp_path: Path) -> N
     report = asyncio.run(runner.run_all(task, tmp_path))
 
     (result,) = report.results
-    assert result.status == "fail"
+    assert result.status == "inconclusive"
     assert result.blocked
+    assert result.reason == "evidence-missing"
     assert result.metadata == {"P0": 1, "P1": 0, "P2": 0}
     assert _P0_INCIDENT_CASE_STEM in result.details
     results_path = tmp_path / ".sdd" / "eval" / "incident_results" / f"{_P0_INCIDENT_CASE_STEM}.json"
@@ -632,8 +641,9 @@ def test_incident_evals_gate_rejects_run_dir_only_proof(tmp_path: Path) -> None:
     report = asyncio.run(runner.run_all(task, run_dir))
 
     (result,) = report.results
-    assert result.status == "fail"
+    assert result.status == "inconclusive"
     assert result.blocked
+    assert result.reason == "evidence-missing"
     results_path = workdir / ".sdd" / "eval" / "incident_results" / f"{_P0_INCIDENT_CASE_STEM}.json"
     assert not results_path.exists()
 
@@ -664,8 +674,9 @@ def test_incident_evals_gate_rejects_empty_marker_in_run_dir(tmp_path: Path) -> 
     report = asyncio.run(runner.run_all(task, run_dir))
 
     (result,) = report.results
-    assert result.status == "fail"
+    assert result.status == "inconclusive"
     assert result.blocked
+    assert result.reason == "evidence-missing"
 
 
 def test_incident_evals_gate_cache_does_not_reuse_stale_pass(tmp_path: Path) -> None:
@@ -673,8 +684,16 @@ def test_incident_evals_gate_cache_does_not_reuse_stale_pass(tmp_path: Path) -> 
     (the incident corpus and ``.sdd`` proof markers) that isn't captured by
     the changed-file hash the cache key is built from. A cached PASS from
     before a P0 case existed must not be reused once one appears.
+
+    The first run seeds a real P1-only corpus (not an empty one) so its
+    verdict is a genuine ``pass``, not ``skipped`` -- a ``skipped`` result
+    was never a cache-survival risk in the first place, since it still
+    participates in the same non-cacheable exclusion.
     """
     (tmp_path / "owned.txt").write_text("unchanged\n", encoding="utf-8")
+    cases_dir = tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents"
+    cases_dir.mkdir(parents=True)
+    (cases_dir / "inc-p1case.yaml").write_text("id: inc-p1case\nseverity: P1\n", encoding="utf-8")
     config = QualityGatesConfig(
         pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
         cache_enabled=True,
@@ -687,18 +706,18 @@ def test_incident_evals_gate_cache_does_not_reuse_stale_pass(tmp_path: Path) -> 
     assert first_result.status == "pass"
     assert not first_result.cached
 
-    _write_p0_incident_case(tmp_path)
+    (cases_dir / f"{_P0_INCIDENT_CASE_STEM}.yaml").write_text(_P0_INCIDENT_CASE_YAML, encoding="utf-8")
 
     second_report = asyncio.run(runner.run_all(task, tmp_path))
     (second_result,) = second_report.results
-    assert second_result.status == "fail"
+    assert second_result.status == "inconclusive"
     assert second_result.blocked
     assert not second_result.cached
 
 
 def test_incident_evals_gate_not_blocked_when_not_required(tmp_path: Path) -> None:
-    """L2: a failing P0 case on an optional (``required=False``) gate step
-    is reported but must not block.
+    """L2: an inconclusive P0 case on an optional (``required=False``) gate
+    step is reported but must not block.
     """
     _write_p0_incident_case(tmp_path)
     config = QualityGatesConfig(
@@ -711,7 +730,7 @@ def test_incident_evals_gate_not_blocked_when_not_required(tmp_path: Path) -> No
     report = asyncio.run(runner.run_all(task, tmp_path))
 
     (result,) = report.results
-    assert result.status == "fail"
+    assert result.status == "inconclusive"
     assert not result.blocked
 
 
