@@ -467,6 +467,7 @@ class GateRunner:
         _sync_no_cf_gates: dict[str, Any] = {
             "benchmark": self._run_benchmark_gate_sync,
             "migration_reversibility": self._run_migration_reversibility_gate_sync,
+            "incident_evals": self._run_incident_evals_gate_sync,
         }
         sync_no_cf = _sync_no_cf_gates.get(step.name)
         if sync_no_cf is not None:
@@ -993,6 +994,26 @@ class GateRunner:
             duration_ms=0,
             details=detail,
             metadata={"migration_count": migration_count, "missing_rollback": len(issues)},
+        )
+
+    def _run_incident_evals_gate_sync(
+        self,
+        step: GatePipelineStep,
+        run_dir: Path,
+    ) -> GateResult:
+        """Run P0 incident-eval regression cases as a blocking quality gate (#6156)."""
+        from bernstein.eval.incident_synthesizer import run_incident_eval_gate
+
+        passed, detail, counts = run_incident_eval_gate(run_dir)
+        return GateResult(
+            name=step.name,
+            status="pass" if passed else "fail",
+            required=step.required,
+            blocked=step.required and not passed,
+            cached=False,
+            duration_ms=0,
+            details=detail,
+            metadata=dict(counts),
         )
 
     def _run_run_config_gate_sync(

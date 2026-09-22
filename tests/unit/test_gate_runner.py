@@ -462,3 +462,118 @@ def test_dead_code_gate_runs_to_completion_instead_of_crashing(tmp_path: Path) -
     assert report.gates_run == ["dead_code"]
     (result,) = report.results
     assert result.status in ("pass", "fail", "warn")
+
+
+def test_incident_evals_gate_is_dispatchable(tmp_path: Path) -> None:
+    """Regression for #6156: ``incident_evals`` was in ``VALID_GATE_NAMES``
+    (so config validation accepted it) but had no entry in any of
+    ``GateRunner._execute_gate``'s dispatch tables, so it fell through to
+    ``_execute_plugin_gate`` -- which also can't serve it, because plugin
+    registration explicitly refuses any name that collides with a built-in
+    (``VALID_GATE_NAMES``) gate. The only way out was
+    ``ValueError: Unsupported gate name: 'incident_evals'`` at run time,
+    after config validation had already accepted the pipeline.
+
+    This exercises the real ``run_incident_eval_gate`` implementation
+    (already shipped in ``eval/incident_synthesizer.py``) with an empty
+    ``tmp_path``, which has no ``src/bernstein/eval/cases/incidents``
+    directory -- a fast, filesystem-only "no cases" pass, no subprocess or
+    network involved.
+    """
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, tmp_path)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, tmp_path))
+
+    assert report.gates_run == ["incident_evals"]
+    (result,) = report.results
+    assert result.status == "pass"
+    assert not result.blocked
+
+
+def test_every_valid_gate_name_is_dispatchable(tmp_path: Path) -> None:
+    """General invariant behind #6156: every name in ``VALID_GATE_NAMES``
+    must resolve to a real handler in ``GateRunner._execute_gate`` and never
+    fall through to the plugin-registry fallback, which raises
+    ``ValueError: Unsupported gate name`` for any built-in name (plugin
+    registration refuses names that collide with ``VALID_GATE_NAMES``).
+
+    Each handler is stubbed so this test isolates *dispatch* (did routing
+    find a handler) from gate *behaviour* (did the gate's own logic pass or
+    fail). Exercising every gate's real logic here would mean spinning up
+    subprocesses (ruff/mypy/pytest/bandit/mutmut) and -- per #6156's own
+    report -- risking a real network call for ``intent_verification``
+    (``OPENROUTER_API_KEY_PAID``). That is exactly the flakiness this
+    regression test must not introduce.
+    """
+    from bernstein.core.gate_runner import GateResult
+
+    from bernstein.core.quality.gate_pipeline import VALID_GATE_NAMES
+
+    config = QualityGatesConfig(cache_enabled=False)
+    runner = GateRunner(config, tmp_path)
+    task = _make_task()
+
+    stub_result = GateResult(
+        name="stub",
+        status="pass",
+        required=False,
+        blocked=False,
+        cached=False,
+        duration_ms=0,
+        details="stubbed for dispatch test",
+        metadata={},
+    )
+
+    def _sync_stub(*_args: object, **_kwargs: object) -> GateResult:
+        return stub_result
+
+    async def _async_stub(*_args: object, **_kwargs: object) -> GateResult:
+        return stub_result
+
+    # Every handler name referenced by GateRunner._execute_gate's dispatch
+    # tables (`_sync_cf_gates` / `_sync_no_cf_gates` / `_async_gates`).
+    # Instance-attribute assignment shadows the bound method, and the
+    # dispatch dicts look up `self.<name>` fresh on every call, so this
+    # reaches the exact same routing code the real run does.
+    sync_handler_names = [
+        "_run_auto_format_gate_sync",
+        "_run_complexity_gate_sync",
+        "_run_dead_code_gate_sync",
+        "_run_comment_quality_gate_sync",
+        "_run_import_cycle_gate_sync",
+        "_run_coverage_delta_gate_sync",
+        "_run_merge_conflict_gate_sync",
+        "_run_large_file_gate_sync",
+        "_run_run_config_gate_sync",
+        "_run_benchmark_gate_sync",
+        "_run_migration_reversibility_gate_sync",
+        "_run_incident_evals_gate_sync",
+        "_run_test_expansion_gate_sync",
+    ]
+    async_handler_names = [
+        "_execute_lint_gate",
+        "_execute_type_check_gate",
+        "_run_tests_gate",
+        "_execute_security_scan_gate",
+        "_execute_scan_gate",
+        "_execute_mutation_gate",
+        "_execute_intent_gate",
+        "_execute_dep_audit_gate",
+        "_run_integration_test_gen_gate",
+        "_run_review_rubric_gate",
+        "_run_behavior_probe_gate",
+    ]
+    for name in sync_handler_names:
+        setattr(runner, name, _sync_stub)
+    for name in async_handler_names:
+        setattr(runner, name, _async_stub)
+
+    for name in sorted(VALID_GATE_NAMES):
+        step = GatePipelineStep(name=name, required=False, condition="always")
+        result = asyncio.run(runner.run_gate(step, task, tmp_path, []))
+        assert result is stub_result, f"{name}: did not reach a stubbed dispatch handler"
