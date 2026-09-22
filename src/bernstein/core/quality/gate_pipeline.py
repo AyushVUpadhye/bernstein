@@ -82,7 +82,6 @@ VALID_GATE_NAMES = frozenset(
         "agent_test_mutation",
         "behavior_probe",
         "incident_evals",
-        "publish_verification",
     }
 )
 VALID_GATE_CONDITIONS = frozenset({"always", "python_changed", "tests_changed", "any_changed", "deps_changed"})
