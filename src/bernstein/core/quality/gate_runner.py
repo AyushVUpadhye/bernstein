@@ -458,6 +458,7 @@ class GateRunner:
             "merge_conflict": self._run_merge_conflict_gate_sync,
             "large_file": self._run_large_file_gate_sync,
             "run_config": self._run_run_config_gate_sync,
+            "publish_verification": self._run_publish_verification_gate_sync,
         }
         sync_fn = _sync_cf_gates.get(step.name)
         if sync_fn is not None:
@@ -1090,6 +1091,145 @@ class GateRunner:
             details=detail,
             metadata={"threshold": threshold, "oversized_files": len(oversized)},
         )
+
+    def _run_publish_verification_gate_sync(
+        self,
+        step: GatePipelineStep,
+        run_dir: Path,
+        changed_files: list[str],
+    ) -> GateResult:
+        """Block a publish step whose own verification is declared impossible (#6153).
+
+        A ``publish.json`` can claim ``publish: true`` while also claiming
+        ``skip_verification: true`` or ``remote_only: true`` -- an explicit,
+        self-reported admission that nothing actually checked the publish
+        claim. That is not a verification failure a command-based gate would
+        ever see fail; the verification is being asserted as inapplicable,
+        not run and found wanting. ``publish.json`` is the filename the
+        motivating fixture uses (issue #6153); there is no broader Bernstein
+        schema for a "publish step" to key off, so the check is scoped to
+        that one conventional name rather than scanning every changed JSON
+        file for the same three keys.
+
+        A stub verification callable (a function named like ``verify_*``
+        whose entire body is ``raise NotImplementedError(...)``) does not
+        block on its own -- an unrelated, unpublished stub is ordinary work
+        in progress and legitimate local verification can be genuinely
+        inapplicable outside a publish step. It is reported only as
+        corroborating detail once a publish declaration has already
+        triggered a finding.
+        """
+        findings = self._find_publish_declarations(run_dir, changed_files)
+        if not findings:
+            return GateResult(
+                name=step.name,
+                status="pass",
+                required=step.required,
+                blocked=False,
+                cached=False,
+                duration_ms=0,
+                details="No publish.json declares its verification skipped or remote-only.",
+                metadata={},
+            )
+
+        stub_functions = self._find_stub_verification_functions(run_dir, changed_files)
+        lines = [f"  {path}: publish=true with {flag}=true" for path, flag in findings]
+        detail = "Publish declaration(s) claim verification impossible:\n" + "\n".join(lines)
+        if stub_functions:
+            detail += "\nStub verification callable(s): " + ", ".join(stub_functions)
+
+        return GateResult(
+            name=step.name,
+            status="fail",
+            required=step.required,
+            blocked=step.required,
+            cached=False,
+            duration_ms=0,
+            details=detail,
+            metadata={
+                "publish_declarations": len(findings),
+                "stub_verification_functions": len(stub_functions),
+            },
+        )
+
+    def _find_publish_declarations(self, run_dir: Path, changed_files: list[str]) -> list[tuple[str, str]]:
+        """Return ``(path, flag)`` for each changed ``publish.json`` that
+        declares ``publish`` together with ``skip_verification`` or
+        ``remote_only``.
+        """
+        findings: list[tuple[str, str]] = []
+        for rel_path in changed_files:
+            if Path(rel_path).name != "publish.json":
+                continue
+            file_path = run_dir / rel_path
+            if not file_path.is_file():
+                continue
+            flag = self._publish_flag_from_json(file_path)
+            if flag is not None:
+                findings.append((rel_path, flag))
+        return findings
+
+    @staticmethod
+    def _publish_declares_impossible(data: dict[str, Any]) -> str | None:
+        """Return the offending flag name when *data* claims an unverified publish."""
+        if data.get("publish") is not True:
+            return None
+        for flag in ("skip_verification", "remote_only"):
+            if data.get(flag) is True:
+                return flag
+        return None
+
+    def _publish_flag_from_json(self, file_path: Path) -> str | None:
+        try:
+            data = json.loads(file_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return self._publish_declares_impossible(data)
+
+    def _find_stub_verification_functions(self, run_dir: Path, changed_files: list[str]) -> list[str]:
+        """Return ``path:function`` for each changed verification function that is a stub.
+
+        Matches a function whose name contains "verify" (case-insensitive)
+        and whose entire body -- past an optional docstring -- is a single
+        ``raise NotImplementedError(...)``. Same shape-check idiom as
+        ``_migration_downgrade_is_pass`` in ``gate_commands.py`` (strip a
+        leading docstring, then require exactly one statement of the
+        expected shape); that helper checks for a bare ``pass`` on a
+        differently-named function, so it is not itself reusable here, but
+        the pattern is deliberately kept identical rather than invented
+        fresh.
+        """
+        found: list[str] = []
+        for rel_path in self._python_files(changed_files):
+            file_path = run_dir / rel_path
+            if not file_path.is_file():
+                continue
+            try:
+                tree = ast.parse(file_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, SyntaxError):
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if "verify" not in node.name.lower():
+                    continue
+                if self._body_only_raises_not_implemented(node.body):
+                    found.append(f"{rel_path}:{node.name}")
+        return found
+
+    @staticmethod
+    def _body_only_raises_not_implemented(body: list[ast.stmt]) -> bool:
+        statements = [
+            stmt for stmt in body if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
+        ]
+        if len(statements) != 1 or not isinstance(statements[0], ast.Raise):
+            return False
+        exc = statements[0].exc
+        if isinstance(exc, ast.Call):
+            exc = exc.func
+        return isinstance(exc, ast.Name) and exc.id == "NotImplementedError"
 
     def _run_auto_format_gate_sync(
         self,
