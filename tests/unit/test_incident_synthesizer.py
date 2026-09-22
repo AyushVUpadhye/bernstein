@@ -189,6 +189,51 @@ class TestIncidentEvalGate:
         assert passed is True
         assert counts["P1"] >= 1
 
+    def test_workdir_defaults_to_run_dir_when_omitted(self, tmp_path: Path) -> None:
+        """Back-compat: callers that pass a single root (the common case
+        where the agent worktree and the runner's project root are the
+        same directory) keep working unchanged.
+        """
+        _seed_dlq(tmp_path, reason="prompt_injection")
+        IncidentSynthesizer(tmp_path).sync()
+        passed, _detail, _counts = run_incident_eval_gate(tmp_path)
+        assert passed is False
+
+        results_dir = tmp_path / ".sdd" / "eval" / "incident_results"
+        results_dir.mkdir(parents=True)
+        case_stem = next((tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents").glob("inc-*.yaml")).stem
+        (results_dir / f"{case_stem}.json").write_text("{}", encoding="utf-8")
+        passed, _detail, _counts = run_incident_eval_gate(tmp_path)
+        assert passed is True
+
+    def test_proof_resolved_from_workdir_not_run_dir(self, tmp_path: Path) -> None:
+        """H1 (#6165 review): the incident corpus lives under ``run_dir``,
+        but the trusted proof marker must be resolved from ``workdir`` --
+        never from ``run_dir``, which is untracked state the agent under
+        review controls.
+        """
+        run_dir = tmp_path / "worktree"
+        workdir = tmp_path / "project"
+        run_dir.mkdir()
+        workdir.mkdir()
+        _seed_dlq(run_dir, reason="prompt_injection")
+        IncidentSynthesizer(run_dir).sync()
+        case_stem = next((run_dir / "src" / "bernstein" / "eval" / "cases" / "incidents").glob("inc-*.yaml")).stem
+
+        # An empty proof marker written only under run_dir must not pass.
+        run_dir_results = run_dir / ".sdd" / "eval" / "incident_results"
+        run_dir_results.mkdir(parents=True)
+        (run_dir_results / f"{case_stem}.json").write_text("", encoding="utf-8")
+        passed, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
+        assert passed is False
+
+        # The same case passes once real proof exists under the trusted workdir.
+        workdir_results = workdir / ".sdd" / "eval" / "incident_results"
+        workdir_results.mkdir(parents=True)
+        (workdir_results / f"{case_stem}.json").write_text("{}", encoding="utf-8")
+        passed, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
+        assert passed is True
+
 
 # ---------------------------------------------------------------------------
 # Direct API

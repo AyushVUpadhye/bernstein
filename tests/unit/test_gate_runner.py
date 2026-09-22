@@ -576,6 +576,196 @@ def test_incident_evals_gate_passes_p0_case_once_results_exist(tmp_path: Path) -
     assert result.metadata == {"P0": 1, "P1": 0, "P2": 0}
 
 
+def test_incident_evals_gate_trusts_workdir_proof_over_run_dir(tmp_path: Path) -> None:
+    """H1 (#6165 review): the incident corpus under review lives in the
+    agent worktree (``run_dir``), but the P0 proof marker must be resolved
+    from the runner/project's trusted ``.sdd`` root (``workdir``), which is
+    a *different* directory here -- never from ``run_dir``.
+    """
+    workdir = tmp_path / "project"
+    run_dir = tmp_path / "worktree"
+    workdir.mkdir()
+    run_dir.mkdir()
+    _write_p0_incident_case(run_dir)
+
+    results_dir = workdir / ".sdd" / "eval" / "incident_results"
+    results_dir.mkdir(parents=True)
+    (results_dir / f"{_P0_INCIDENT_CASE_STEM}.json").write_text("{}", encoding="utf-8")
+
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, workdir)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, run_dir))
+
+    (result,) = report.results
+    assert result.status == "pass"
+    assert not result.blocked
+
+
+def test_incident_evals_gate_rejects_run_dir_only_proof(tmp_path: Path) -> None:
+    """H1 counterpart: a non-empty proof marker written only under the
+    agent's own worktree (``run_dir``) must NOT satisfy the gate -- proof
+    must come from the trusted ``workdir``, not from state the agent under
+    review controls.
+    """
+    workdir = tmp_path / "project"
+    run_dir = tmp_path / "worktree"
+    workdir.mkdir()
+    run_dir.mkdir()
+    _write_p0_incident_case(run_dir)
+
+    results_dir = run_dir / ".sdd" / "eval" / "incident_results"
+    results_dir.mkdir(parents=True)
+    (results_dir / f"{_P0_INCIDENT_CASE_STEM}.json").write_text('{"passed": true}', encoding="utf-8")
+
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, workdir)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, run_dir))
+
+    (result,) = report.results
+    assert result.status == "fail"
+    assert result.blocked
+    results_path = workdir / ".sdd" / "eval" / "incident_results" / f"{_P0_INCIDENT_CASE_STEM}.json"
+    assert not results_path.exists()
+
+
+def test_incident_evals_gate_rejects_empty_marker_in_run_dir(tmp_path: Path) -> None:
+    """H1 security regression: the reviewer showed that an agent (or repair
+    agent) could satisfy the gate by writing an EMPTY marker file in its own
+    gitignored worktree. That must not work once proof is resolved from the
+    trusted ``workdir``.
+    """
+    workdir = tmp_path / "project"
+    run_dir = tmp_path / "worktree"
+    workdir.mkdir()
+    run_dir.mkdir()
+    _write_p0_incident_case(run_dir)
+
+    results_dir = run_dir / ".sdd" / "eval" / "incident_results"
+    results_dir.mkdir(parents=True)
+    (results_dir / f"{_P0_INCIDENT_CASE_STEM}.json").write_text("", encoding="utf-8")
+
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, workdir)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, run_dir))
+
+    (result,) = report.results
+    assert result.status == "fail"
+    assert result.blocked
+
+
+def test_incident_evals_gate_cache_does_not_reuse_stale_pass(tmp_path: Path) -> None:
+    """M1 (#6165 review): the gate's verdict depends on filesystem state
+    (the incident corpus and ``.sdd`` proof markers) that isn't captured by
+    the changed-file hash the cache key is built from. A cached PASS from
+    before a P0 case existed must not be reused once one appears.
+    """
+    (tmp_path / "owned.txt").write_text("unchanged\n", encoding="utf-8")
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=True,
+    )
+    runner = GateRunner(config, tmp_path)
+    task = _make_task(owned_files=["owned.txt"])
+
+    first_report = asyncio.run(runner.run_all(task, tmp_path))
+    (first_result,) = first_report.results
+    assert first_result.status == "pass"
+    assert not first_result.cached
+
+    _write_p0_incident_case(tmp_path)
+
+    second_report = asyncio.run(runner.run_all(task, tmp_path))
+    (second_result,) = second_report.results
+    assert second_result.status == "fail"
+    assert second_result.blocked
+    assert not second_result.cached
+
+
+def test_incident_evals_gate_not_blocked_when_not_required(tmp_path: Path) -> None:
+    """L2: a failing P0 case on an optional (``required=False``) gate step
+    is reported but must not block.
+    """
+    _write_p0_incident_case(tmp_path)
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=False, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, tmp_path)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, tmp_path))
+
+    (result,) = report.results
+    assert result.status == "fail"
+    assert not result.blocked
+
+
+def test_incident_evals_gate_p1_p2_counted_but_does_not_block(tmp_path: Path) -> None:
+    """L2: documents actual current behaviour -- P1/P2 cases are included
+    in ``metadata`` counts but the gate still returns ``pass`` (there is no
+    separate warning status emitted).
+    """
+    cases_dir = tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents"
+    cases_dir.mkdir(parents=True)
+    (cases_dir / "inc-p1case.yaml").write_text("id: inc-p1case\nseverity: P1\n", encoding="utf-8")
+    (cases_dir / "inc-p2case.yaml").write_text("id: inc-p2case\nseverity: P2\n", encoding="utf-8")
+
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, tmp_path)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, tmp_path))
+
+    (result,) = report.results
+    assert result.status == "pass"
+    assert not result.blocked
+    assert result.metadata == {"P0": 0, "P1": 1, "P2": 1}
+
+
+def test_incident_evals_gate_controls_unreadable_case_file(tmp_path: Path) -> None:
+    """M2 (#6165 review): an incident case file that isn't valid UTF-8 must
+    not crash the pipeline with an unhandled ``UnicodeDecodeError`` -- the
+    gate must produce the repository's established ``inconclusive`` verdict
+    instead, same convention as benchmark/integration_test_gen/
+    behavior_probe.
+    """
+    cases_dir = tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents"
+    cases_dir.mkdir(parents=True)
+    (cases_dir / "inc-badutf8.yaml").write_bytes(b"\xff\xfe\x00\x01 not valid utf-8")
+
+    config = QualityGatesConfig(
+        pipeline=[GatePipelineStep(name="incident_evals", required=True, condition="always")],
+        cache_enabled=False,
+    )
+    runner = GateRunner(config, tmp_path)
+    task = _make_task()
+
+    report = asyncio.run(runner.run_all(task, tmp_path))
+
+    (result,) = report.results
+    assert result.status == "inconclusive"
+    assert result.blocked
+    assert result.reason == "runner-died-before-output"
+
+
 def test_every_valid_gate_name_is_dispatchable(tmp_path: Path) -> None:
     """General invariant behind #6156: every name in ``VALID_GATE_NAMES``
     must resolve to a real handler in ``GateRunner._execute_gate`` and never

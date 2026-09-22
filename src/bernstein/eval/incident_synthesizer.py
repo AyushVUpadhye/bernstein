@@ -499,10 +499,26 @@ class IncidentSynthesizer:
 # ---------------------------------------------------------------------------
 
 
-def run_incident_eval_gate(workdir: Path) -> tuple[bool, str, dict[str, int]]:
+def run_incident_eval_gate(run_dir: Path, workdir: Path | None = None) -> tuple[bool, str, dict[str, int]]:
     """Run all P0 incident eval cases as a blocking quality gate.
 
     P1 / P2 cases are surfaced as warnings only.
+
+    Args:
+        run_dir: The governed agent worktree. The incident-case corpus
+            (``src/bernstein/eval/cases/incidents/``) under review is read
+            from here.
+        workdir: The runner/project root that owns the trusted ``.sdd``
+            state. Proof markers (``.sdd/eval/incident_results/<case>.json``)
+            are read from here, never from ``run_dir``. Defaults to
+            ``run_dir`` for callers that don't distinguish the two roots
+            (e.g. a run where the agent worktree *is* the project root).
+
+    A worktree is untracked/gitignored state the agent under review
+    controls; if proof were read from there, an agent (or a repair agent)
+    could satisfy a P0 gate by writing an empty marker file in its own
+    worktree without ever producing real evidence. Proof must therefore
+    come from the runner's own trusted root, never from the corpus root.
 
     Returns:
         ``(passed, detail, counts)``. ``passed`` is False when any P0
@@ -510,7 +526,8 @@ def run_incident_eval_gate(workdir: Path) -> tuple[bool, str, dict[str, int]]:
         present but the harness cannot prove regression status. The gate
         fails closed: missing harness data on a P0 incident blocks merge.
     """
-    cases_dir = workdir / "src" / "bernstein" / "eval" / "cases" / "incidents"
+    trusted_root = workdir if workdir is not None else run_dir
+    cases_dir = run_dir / "src" / "bernstein" / "eval" / "cases" / "incidents"
     counts = {"P0": 0, "P1": 0, "P2": 0}
     if not cases_dir.is_dir():
         return True, "no incident eval cases", counts
@@ -523,7 +540,7 @@ def run_incident_eval_gate(workdir: Path) -> tuple[bool, str, dict[str, int]]:
         # Without a wired harness we treat absence-of-pass as fail for
         # P0 only. P1/P2 are warn-only per the ticket.
         if sev == "P0":
-            results_path = workdir / ".sdd" / "eval" / "incident_results" / f"{path.stem}.json"
+            results_path = trusted_root / ".sdd" / "eval" / "incident_results" / f"{path.stem}.json"
             if not results_path.is_file():
                 p0_failed.append(path.stem)
 
