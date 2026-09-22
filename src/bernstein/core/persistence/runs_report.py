@@ -55,6 +55,7 @@ from bernstein.core.persistence.work_ledger import (
     KIND_RUN_CLOSED,
     KIND_TASK_COMPLETED,
     KIND_TASK_FAILED,
+    KIND_TASK_STARTED,
     RUN_KINDS,
     LedgerError,
     LedgerReader,
@@ -831,8 +832,11 @@ class TaskRetrySequence:
     Attributes:
         run_id: The ledger root this sequence was read from.
         task_id: The task's stable identity within that ledger root.
-        failed_attempts: Consecutive ``task.failed`` entries recorded for
-            this task id immediately before its eventual ``task.completed``.
+        failed_attempts: Total ``task.failed`` entries recorded for this
+            task id before its first ``task.completed``. Not necessarily
+            consecutive or adjacent to the completion: a ``task.scheduled``
+            or ``task.started`` entry between two failures neither resets
+            nor breaks the count (see :func:`task_retry_sequences`).
         succeeded: Whether the task id has a ``task.completed`` entry at
             all. Always ``True`` for a row :func:`task_retry_sequences`
             returns -- the field exists so the type can represent a
@@ -910,7 +914,16 @@ def task_retry_sequences(ledger_dir: Path, *, run_id: str) -> list[TaskRetrySequ
     # a task id with no completion is not a masked failure.
     rows: list[TaskRetrySequence] = []
     for task_id, task_entries in per_task.items():
-        started_at = task_entries[0].ts
+        # `task_entries[0]` is usually `task.scheduled`, not `task.started`
+        # -- the docstring promises the latter, so pick it explicitly rather
+        # than the group's first entry of any kind. Falls back to the first
+        # entry for a ledger missing a `task.started` record (should not
+        # happen in a normal lifecycle, but a row still needs some instant
+        # rather than raising on an otherwise-valid completed/failed task).
+        started_at = next(
+            (e.ts for e in task_entries if e.kind == KIND_TASK_STARTED),
+            task_entries[0].ts,
+        )
         failed_run = 0
         for entry in task_entries:
             if entry.kind == KIND_TASK_FAILED:
