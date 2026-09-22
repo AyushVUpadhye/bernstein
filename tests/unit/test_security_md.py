@@ -18,11 +18,27 @@ import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
+#: This test reads two fixed repo-root files by path rather than importing
+#: any `bernstein` module, so no diff ever produces an import edge to it. A
+#: release bump that rewrites `pyproject.toml`'s version and leaves
+#: `SECURITY.md` stale is exactly the change this file exists to catch, so it
+#: has to run on that bump PR itself, not only on a future PR that happens to
+#: touch one of these two files directly (`tests/unit/test_docs_dependency_group.py`
+#: is the same shape, and carries the same marker).
+pytestmark = pytest.mark.whole_tree_guard
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
 SECURITY_MD = REPO_ROOT / "SECURITY.md"
 
+#: Skips the header row (`version.lower() == "version"`) and both plain
+#: (`---------`) and GFM alignment (`:---:`) separator rows -- a formatter is
+#: free to rewrite the separator into the colon form without changing what
+#: the table means, and that must not be parsed as a data row.
 _ROW_RE = re.compile(r"^\|\s*(?P<version>[^|]+?)\s*\|\s*(?P<supported>[^|]+?)\s*\|\s*$", re.MULTILINE)
+_SEPARATOR_CHARS = frozenset("-:")
 
 
 def _project_minor_version() -> str:
@@ -49,7 +65,7 @@ def _supported_versions_table() -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for match in _ROW_RE.finditer(section):
         version, supported = match.group("version"), match.group("supported")
-        if version.lower() == "version" or set(version) <= {"-"}:
+        if version.lower() == "version" or set(version) <= _SEPARATOR_CHARS:
             continue
         rows.append((version, supported))
     return rows
@@ -94,6 +110,46 @@ def test_supported_versions_table_marks_everything_else_unsupported() -> None:
     for version, supported in rows:
         if version != f"{minor}.x":
             assert supported == "No", f"{version} should be marked No (no backport branch), got {supported!r}."
+
+
+def test_supported_versions_table_has_no_contradictory_current_row() -> None:
+    """The current release line must appear exactly once, marked ``Yes``.
+
+    ``test_supported_versions_table_marks_everything_else_unsupported`` skips
+    every row whose version equals the current line before checking
+    ``supported == "No"``, so a table listing both ``3.20.x | Yes`` and a
+    stray ``3.20.x | No`` passes every other test here: the Yes-row check
+    finds its row, and the everything-else check never looks at the
+    contradictory one. Require the current line to appear exactly once.
+    """
+    minor = _project_minor_version()
+    rows = _supported_versions_table()
+    current_rows = [row for row in rows if row[0] == f"{minor}.x"]
+    assert current_rows == [(f"{minor}.x", "Yes")], (
+        f"SECURITY.md's Supported Versions table must list the current "
+        f"release line ({minor}.x) exactly once, marked Yes; got {current_rows}."
+    )
+
+
+def test_supported_versions_table_names_the_current_unsupported_bound() -> None:
+    """The ``< X.Y`` row must name the *current* minor, not a stale one.
+
+    ``test_supported_versions_table_marks_everything_else_unsupported`` only
+    requires every non-current row to read ``No`` -- a table with no
+    unsupported row at all, or one whose bound still names an old minor
+    (``< 3.19`` after the project moved to 3.21), passes that check because it
+    never compares the row's *version* against the current line. #6065's own
+    acceptance criteria name both the ``Yes`` row and the ``< X.Y`` row, so
+    pin the second one explicitly too.
+    """
+    minor = _project_minor_version()
+    rows = _supported_versions_table()
+    expected_row = (f"< {minor}", "No")
+    assert expected_row in rows, (
+        f"SECURITY.md's Supported Versions table must mark every release "
+        f"before the current line unsupported with a '< {minor}' row; got "
+        f"{rows}."
+    )
 
 
 def test_no_backport_branch_policy_still_documented() -> None:
