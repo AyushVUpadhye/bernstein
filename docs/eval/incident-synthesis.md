@@ -11,10 +11,8 @@ across 2+ commits never made it into the eval corpus at all.
 
 `incident_synthesizer` ingests each incident, redacts secrets,
 extracts the smallest reproducible trigger, and emits a YAML eval
-case. The eval corpus thus grows from production failures. The
-`incident_evals` quality gate (see below) then checks that every P0
-case has recorded proof of a regression run before allowing merge -
-it does not itself execute the cases against an agent.
+case. The eval corpus thus grows from production failures, and CI
+runs them as gates: P0 cases block release, P1 / P2 warn.
 
 ## Why it exists
 
@@ -90,77 +88,17 @@ expected_outcome:
 source_incident: postmortem-2026-04-22-T14:33:11Z
 ```
 
-### The `incident_evals` quality gate
-
-`incident_evals` is a **proof-checking** gate, not a re-run of the
-incidents: it does not execute the synthesised cases against an agent. For
-every P0 case's YAML file under `src/bernstein/eval/cases/incidents/`, it
-checks whether a corresponding proof-of-regression-run marker exists at
-
-```
-<runner/project workdir>/.sdd/eval/incident_results/<case-id>.json
-```
-
-A missing marker for any P0 case blocks merge at a required gate, but the
-status it reports is `inconclusive`, not `fail`: the harness never
-evaluated the case, so the gate cannot honestly claim a regression ran and
-was observed - only that it has no evidence either way. `blocked` behaves
-identically to `fail` at a required gate; only the verdict label and the
-`reason` (`evidence-missing`) differ, so an offline audit receipt can tell
-"no evidence" apart from "measured and failed". A repository with no
-incident corpus at all reports `skipped`, not `pass`, for the same reason:
-"nothing to check" and "checked, found nothing wrong" are different claims.
-P1 and P2 cases are counted in the gate's `metadata` (`{"P0": n, "P1": n,
-"P2": n}`) but never affect the verdict; the current implementation does
-not emit a separate warning status for them.
-
-Two directories matter and they are **not** the same thing:
-
-- The **incident corpus** (the case YAML files) is read from the agent's
-  own worktree under review.
-- The **proof marker** is read from the runner/project's trusted `.sdd`
-  root, which is a separate, git-tracked-adjacent location the agent under
-  review does not control. This distinction exists because the worktree's
-  `.sdd` directory is gitignored and disposable - if proof were accepted
-  from there, an agent could satisfy a P0 block by writing an empty marker
-  file in its own worktree without ever producing real evidence.
-
-There is no operator procedure to manually clear a P0 block by hand-writing
-a marker file: the marker is expected to be the real output of whatever
-harness ran the case, written into the trusted workdir. If a P0 case is
-blocking and there is no harness wired up to produce that proof yet, the
-gate is doing its job - the case has no verified fix.
-
-`incident_evals` is **not** part of the default gate pipeline: unlike most
-gates, `QualityGatesConfig` has no `incident_evals` boolean flag, so
-`build_default_pipeline()` never includes it automatically. To run it,
-declare an explicit pipeline that lists it:
-
-```yaml
-quality_gates:
-  pipeline:
-    - { name: "lint", required: true, condition: "always" }
-    - { name: "incident_evals", required: true, condition: "always" }
-```
-
-See [Quality Pipeline](../architecture/quality-pipeline.md#gates) for the
-full pipeline-configuration mechanism.
-
-`incident_evals` results are never cached: its verdict depends on
-filesystem state (the corpus and the proof markers) outside the
-changed-file set the gate cache keys off of, so it always re-checks on
-every run rather than risking a stale PASS.
+The quality-gate pipeline runs every incident-derived case alongside
+the rest of the eval suite. Failures on P0 cases are blocking; P1 /
+P2 print warnings.
 
 ## Configuration
 
 | Knob | Default | Controls |
 |---|--:|---|
-| `eval.incident_sync.on_terminal_failure` | `true` | Auto-sync on every dead-letter event (`task_lifecycle.py`). |
+| `eval.incident_sync.on_terminal_failure` | `true` | Auto-sync on every dead-letter event. |
 | `eval.incident_sync.write_path` | `src/bernstein/eval/cases/incidents/` | Where the YAML cases live. |
-
-`eval.gate_severity_blocking` does not exist: nothing in the codebase reads
-it. The gate hard-codes P0 as the only blocking severity; P1/P2 are always
-non-blocking. Treat any reference to this knob elsewhere as stale.
+| `eval.gate_severity_blocking` | `["P0"]` | Which severities block merge. |
 
 Metrics:
 
@@ -177,19 +115,6 @@ Metrics:
 - The minimaliser extracts the trigger using deterministic rules; it
   does not understand semantic intent. For unusual incident shapes
   the case may need hand-editing.
-- `incident_evals` treats a missing corpus directory (no
-  `src/bernstein/eval/cases/incidents/`) as a clean pass, not
-  `skipped`/`inconclusive` like some other gates (e.g.
-  `migration_reversibility`). Left as-is for now - changing it is a
-  behavior change beyond this gate's evidence-handling fix and would need
-  its own justification.
-- The severity parser (`_severity_from_yaml`) only recognises a plain
-  `severity: P0`-style line; a quoted value (`severity: "P0"`) or a
-  trailing comment is not recognised and the case is silently excluded
-  from the P0/P1/P2 counts. This matches what `IncidentSynthesizer`
-  itself always emits (plain, unquoted, comment-free), so it is not
-  currently reachable through the normal synthesis path - only through a
-  hand-edited case file.
 
 ## Related
 

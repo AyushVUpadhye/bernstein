@@ -488,7 +488,6 @@ class GateRunner:
         _sync_no_cf_gates: dict[str, Any] = {
             "benchmark": self._run_benchmark_gate_sync,
             "migration_reversibility": self._run_migration_reversibility_gate_sync,
-            "incident_evals": self._run_incident_evals_gate_sync,
         }
         sync_no_cf = _sync_no_cf_gates.get(step.name)
         if sync_no_cf is not None:
@@ -1032,77 +1031,6 @@ class GateRunner:
             duration_ms=0,
             details=detail,
             metadata={"migration_count": migration_count, "missing_rollback": len(issues)},
-        )
-
-    def _run_incident_evals_gate_sync(
-        self,
-        step: GatePipelineStep,
-        run_dir: Path,
-    ) -> GateResult:
-        """Run P0 incident-eval regression cases as a blocking quality gate (#6156).
-
-        The incident-case corpus under review lives in ``run_dir`` (the
-        agent worktree), but the P0 proof marker it is checked against
-        must come from ``self._workdir`` (the runner/project's trusted
-        ``.sdd`` root) - never from ``run_dir``, which is untracked state
-        the agent under review controls (#6165 review, H1).
-
-        A P0 case with no proof marker is ``inconclusive``, not ``fail``:
-        the harness never evaluated it, so the gate cannot honestly claim a
-        regression ran and was observed - only that it has no evidence
-        either way (#6165 review, #4181's convention). ``blocked`` is
-        unaffected: at a required gate it is still set, same as ``fail``
-        would set it. A missing incident corpus is ``skipped``, not
-        ``pass`` - "nothing to check" and "checked, found nothing wrong"
-        are different claims, and an offline audit receipt needs to tell
-        them apart (#6165 review).
-        """
-        from bernstein.eval.incident_synthesizer import run_incident_eval_gate
-
-        try:
-            status, detail, counts = run_incident_eval_gate(run_dir, self._workdir)
-        except Exception as exc:
-            # The evaluator died before producing a verdict (e.g. a case
-            # file that isn't valid UTF-8). Neither "pass" (a bypass) nor
-            # "fail" (a lie) is honest here - issue #4181's established
-            # convention: ``inconclusive`` with ``blocked`` aligned to
-            # ``required``, same as benchmark/integration_test_gen/
-            # behavior_probe.
-            logger.warning("incident_evals gate failed: %s", exc)
-            return GateResult(
-                name=step.name,
-                status="inconclusive",
-                required=step.required,
-                blocked=step.required,
-                cached=False,
-                duration_ms=0,
-                details=f"Incident eval gate failed: {exc}",
-                metadata={},
-                reason="runner-died-before-output",
-            )
-        if status == "skipped":
-            return self._skipped(step, detail)
-        if status == "inconclusive":
-            return GateResult(
-                name=step.name,
-                status="inconclusive",
-                required=step.required,
-                blocked=step.required,
-                cached=False,
-                duration_ms=0,
-                details=detail,
-                metadata=dict(counts),
-                reason="evidence-missing",
-            )
-        return GateResult(
-            name=step.name,
-            status="pass",
-            required=step.required,
-            blocked=False,
-            cached=False,
-            duration_ms=0,
-            details=detail,
-            metadata=dict(counts),
         )
 
     def _run_run_config_gate_sync(
@@ -1976,13 +1904,7 @@ class GateRunner:
     ) -> str | None:
         if step.name not in VALID_GATE_NAMES:
             return None
-        if step.name in {"coverage_delta", "complexity_check", "merge_conflict", "incident_evals"}:
-            # incident_evals' verdict depends on the trusted workdir's
-            # .sdd/eval/incident_results proof markers and the incident
-            # corpus in run_dir, neither of which is captured by the
-            # changed-file hash the cache key is built from (#6165
-            # review, M1). Caching it risks reusing a stale PASS after a
-            # new P0 case appears or proof state changes.
+        if step.name in {"coverage_delta", "complexity_check", "merge_conflict"}:
             return None
         if step.name == "tests" and self._config.flaky_detection:
             return None

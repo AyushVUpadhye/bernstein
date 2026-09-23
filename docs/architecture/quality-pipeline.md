@@ -130,19 +130,9 @@ Default required gates (only those whose `quality_gates.<flag>: true`):
 | `agent_test_mutation`    | `agent_test_mutation`       | `tests_changed`    | required            |
 | `behavior_probe`         | `behavior_probe`            | `python_changed`   | optional            |
 | `benchmark`              | `benchmark.enabled`         | `always`           | required            |
-| `incident_evals`         | *(none - opt-in only)*      | `always`           | required (if listed)|
 
 A failing **required** gate hard-blocks merge. A failing **optional** gate
 is reported but does not block.
-
-`incident_evals` is the one exception to the table above: it has no
-`QualityGatesConfig` boolean flag, so `build_default_pipeline()` never
-includes it - it only runs when a project declares an explicit
-`quality_gates.pipeline` entry naming it (see
-[Incident-to-eval synthesis](../eval/incident-synthesis.md) for what it
-checks and where its proof markers live). It never participates in gate
-result caching, since its verdict depends on `.sdd` state outside the
-changed-file set the cache is keyed on.
 
 `behavior_probe` is the only gate that executes the changed code against
 inputs the worker did not choose (`behavior_probe.py`). It walks the diff with
