@@ -843,7 +843,11 @@ class TaskRetrySequence:
             not-yet-succeeded task id if a future caller needs that, without
             a second, parallel type.
         started_at: Unix instant of the task id's first ``task.started``
-            entry.
+            entry, or ``None`` when this task id has no ``task.started``
+            entry at all. Never a substitute instant from another event
+            kind (e.g. ``task.scheduled``) -- a caller that gets ``None``
+            here is being told the fact isn't known, not handed a
+            plausible-looking guess (#6179 review).
         completed_at: Unix instant of the ``task.completed`` entry, or
             ``None`` when the task id never completed.
     """
@@ -852,7 +856,7 @@ class TaskRetrySequence:
     task_id: str
     failed_attempts: int
     succeeded: bool
-    started_at: float
+    started_at: float | None
     completed_at: float | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -916,14 +920,12 @@ def task_retry_sequences(ledger_dir: Path, *, run_id: str) -> list[TaskRetrySequ
     for task_id, task_entries in per_task.items():
         # `task_entries[0]` is usually `task.scheduled`, not `task.started`
         # -- the docstring promises the latter, so pick it explicitly rather
-        # than the group's first entry of any kind. Falls back to the first
-        # entry for a ledger missing a `task.started` record (should not
-        # happen in a normal lifecycle, but a row still needs some instant
-        # rather than raising on an otherwise-valid completed/failed task).
-        started_at = next(
-            (e.ts for e in task_entries if e.kind == KIND_TASK_STARTED),
-            task_entries[0].ts,
-        )
+        # than the group's first entry of any kind. `None` when this task
+        # id has no `task.started` entry at all, rather than substituting
+        # another event's timestamp: a row that silently reports the
+        # scheduled instant as the started one asserts a fact the ledger
+        # never recorded (#6179 review).
+        started_at = next((e.ts for e in task_entries if e.kind == KIND_TASK_STARTED), None)
         failed_run = 0
         for entry in task_entries:
             if entry.kind == KIND_TASK_FAILED:

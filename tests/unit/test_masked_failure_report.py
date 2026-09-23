@@ -275,6 +275,24 @@ def test_started_at_is_the_first_task_started_entry_not_the_scheduled_one(tmp_pa
     assert row.started_at != scheduled_entry.ts
 
 
+def test_started_at_is_none_when_no_task_started_entry_exists(tmp_path: Path) -> None:
+    """A ledger missing ``task.started`` gets ``None``, not a substitute instant (#6179 review).
+
+    An earlier version fell back to the task id's first entry of any kind
+    (``task.scheduled`` here), which silently asserted a fact -- "this is
+    when the task started running" -- the ledger never actually recorded.
+    A row still needs to be producible for this anomalous-but-otherwise-
+    valid task id (it has a real failed-then-completed history), so this
+    is ``None``, not a raised exception that would take down the whole
+    report over one task.
+    """
+    _append_task(tmp_path, "run-a", "t1", [KIND_TASK_SCHEDULED, KIND_TASK_FAILED, KIND_TASK_COMPLETED])
+
+    (row,) = task_retry_sequences(_ledger(tmp_path, "run-a"), run_id="run-a")
+
+    assert row.started_at is None
+
+
 def test_succeeded_first_try_is_excluded(tmp_path: Path) -> None:
     _append_task(tmp_path, "run-a", "t1", [KIND_TASK_SCHEDULED, KIND_TASK_STARTED, KIND_TASK_COMPLETED])
 
