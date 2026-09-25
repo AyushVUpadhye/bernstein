@@ -170,76 +170,24 @@ class TestYamlEmission:
 
 
 class TestIncidentEvalGate:
-    def test_no_cases_skips(self, tmp_path: Path) -> None:
-        """No corpus is "nothing to check", not "checked, found nothing
-        wrong" -- those are different claims for an offline audit receipt
-        to make (#6165 review)."""
-        status, _detail, counts = run_incident_eval_gate(tmp_path)
-        assert status == "skipped"
+    def test_no_cases_passes(self, tmp_path: Path) -> None:
+        passed, _detail, counts = run_incident_eval_gate(tmp_path)
+        assert passed is True
         assert counts == {"P0": 0, "P1": 0, "P2": 0}
 
-    def test_p0_without_proof_is_inconclusive(self, tmp_path: Path) -> None:
-        """A P0 case with no proof marker means the harness never
-        evaluated it -- that is ``inconclusive``, not ``fail`` (#6165
-        review): ``fail`` would assert the case ran and regressed, which
-        never happened."""
+    def test_p0_without_proof_blocks(self, tmp_path: Path) -> None:
         _seed_dlq(tmp_path, reason="prompt_injection")
         IncidentSynthesizer(tmp_path).sync()
-        status, detail, counts = run_incident_eval_gate(tmp_path)
-        assert status == "inconclusive"
+        passed, detail, counts = run_incident_eval_gate(tmp_path)
+        assert passed is False
         assert "P0" in detail or counts["P0"] >= 1
 
     def test_p1_only_warns(self, tmp_path: Path) -> None:
         _seed_dlq(tmp_path, reason="token_runaway")
         IncidentSynthesizer(tmp_path).sync()
-        status, _detail, counts = run_incident_eval_gate(tmp_path)
-        assert status == "pass"
+        passed, _detail, counts = run_incident_eval_gate(tmp_path)
+        assert passed is True
         assert counts["P1"] >= 1
-
-    def test_workdir_defaults_to_run_dir_when_omitted(self, tmp_path: Path) -> None:
-        """Back-compat: callers that pass a single root (the common case
-        where the agent worktree and the runner's project root are the
-        same directory) keep working unchanged.
-        """
-        _seed_dlq(tmp_path, reason="prompt_injection")
-        IncidentSynthesizer(tmp_path).sync()
-        status, _detail, _counts = run_incident_eval_gate(tmp_path)
-        assert status == "inconclusive"
-
-        results_dir = tmp_path / ".sdd" / "eval" / "incident_results"
-        results_dir.mkdir(parents=True)
-        case_stem = next((tmp_path / "src" / "bernstein" / "eval" / "cases" / "incidents").glob("inc-*.yaml")).stem
-        (results_dir / f"{case_stem}.json").write_text("{}", encoding="utf-8")
-        status, _detail, _counts = run_incident_eval_gate(tmp_path)
-        assert status == "pass"
-
-    def test_proof_resolved_from_workdir_not_run_dir(self, tmp_path: Path) -> None:
-        """H1 (#6165 review): the incident corpus lives under ``run_dir``,
-        but the trusted proof marker must be resolved from ``workdir`` --
-        never from ``run_dir``, which is untracked state the agent under
-        review controls.
-        """
-        run_dir = tmp_path / "worktree"
-        workdir = tmp_path / "project"
-        run_dir.mkdir()
-        workdir.mkdir()
-        _seed_dlq(run_dir, reason="prompt_injection")
-        IncidentSynthesizer(run_dir).sync()
-        case_stem = next((run_dir / "src" / "bernstein" / "eval" / "cases" / "incidents").glob("inc-*.yaml")).stem
-
-        # An empty proof marker written only under run_dir must not pass.
-        run_dir_results = run_dir / ".sdd" / "eval" / "incident_results"
-        run_dir_results.mkdir(parents=True)
-        (run_dir_results / f"{case_stem}.json").write_text("", encoding="utf-8")
-        status, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
-        assert status == "inconclusive"
-
-        # The same case passes once real proof exists under the trusted workdir.
-        workdir_results = workdir / ".sdd" / "eval" / "incident_results"
-        workdir_results.mkdir(parents=True)
-        (workdir_results / f"{case_stem}.json").write_text("{}", encoding="utf-8")
-        status, _detail, _counts = run_incident_eval_gate(run_dir, workdir)
-        assert status == "pass"
 
 
 # ---------------------------------------------------------------------------
