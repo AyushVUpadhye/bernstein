@@ -16,3 +16,9 @@ specifically, leaving root and every non-`bernstein` logger untouched.
 `bernstein` logger's level, handlers and propagation after every test, so
 even a test that runs a `--quiet`/`--verbose` command directly cannot leak
 into whatever test runs next in the same worker (#6184).
+
+**Operator-visible change:** `--quiet` previously suppressed third-party
+library output too (`httpx`, `uvicorn`, and anything else that inherits
+from root). It no longer does - only the `bernstein` logger is silenced.
+Pass `--quiet` to dependencies separately (their own CLI flags or log
+level env vars) if their output needs suppressing too.
