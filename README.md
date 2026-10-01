@@ -230,7 +230,7 @@ bernstein volunteer verify .
 bernstein volunteer browse --budget 60
 ```
 
-The [donor guide](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/donor-guide.md) covers running a worker and the budget you set, the [project guide](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/project-guide.md) covers declaring a manifest, and the [threat model](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/threat-model.md) states what each boundary does and does not protect. The one-command runner is not shipped yet: `verify`, `browse` and `hub` are the working subcommands today.
+The [donor guide](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/donor-guide.md) covers running a worker and the budget you set, the [project guide](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/project-guide.md) covers declaring a manifest, and the [threat model](https://github.com/sipyourdrink-ltd/bernstein/blob/main/docs/volunteer/threat-model.md) states what each boundary does and does not protect. The one-command runner is not shipped yet: `verify`, `browse`, `budget`, `verify-bundle` and `hub` are the working subcommands today.
 
 ### beyond the front page
 
