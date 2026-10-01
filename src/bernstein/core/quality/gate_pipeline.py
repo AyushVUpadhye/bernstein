@@ -81,6 +81,22 @@ VALID_GATE_NAMES = frozenset(
         "test_expansion",
         "agent_test_mutation",
         "behavior_probe",
+        # "cross_task_collusion" is intentionally NOT listed here. #6282
+        # added it to this set on main, but `run_cross_task_gate` is only
+        # ever called directly from the eval harness
+        # (eval/bench/collusion_bundle.py) -- it has no entry in
+        # `seed_parser.py`'s pipeline-step config, no per-task dispatch
+        # handler in `GateRunner._execute_gate`, and no admission-stage
+        # wiring yet (the PR's own description: "wiring it into the live
+        # admission flow is the next slice"). Listing it here means a user's
+        # custom pipeline step named "cross_task_collusion" passes
+        # `seed_parser.py`'s VALID_GATE_NAMES check and then crashes at
+        # dispatch time with "Unsupported gate name" -- exactly the #6156
+        # bug this file exists to prevent, reintroduced by an unrelated PR.
+        # `test_every_valid_gate_name_is_dispatchable` catches this the
+        # moment it's added back; re-add it only once a real dispatch path
+        # (per-task handler or admission-stage wiring that validates
+        # against its own name set) exists for it.
     }
 )
 VALID_GATE_CONDITIONS = frozenset({"always", "python_changed", "tests_changed", "any_changed", "deps_changed"})
