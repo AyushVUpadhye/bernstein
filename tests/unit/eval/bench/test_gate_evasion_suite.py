@@ -404,7 +404,12 @@ class TestTheGateNameSetIsNotHandMaintained:
     written mirror, a gate that exists and is simply missing from the copy
     produces the same report, and the corpus takes the blame for the copy.
     That happened: ``incident_evals`` was in ``VALID_GATE_NAMES`` and not in
-    the mirror.
+    the mirror -- the fix here was deriving ``gate_runner_gates()`` from
+    ``VALID_GATE_NAMES`` directly, so there's nothing left to drift. #6156
+    then found the other half of the same defect: ``incident_evals`` itself
+    was listed in ``VALID_GATE_NAMES`` with no real dispatch handler, so a
+    config naming it passed validation and crashed at runtime. That PR
+    removed the name rather than adding a handler, since nothing called it.
     """
 
     def test_it_is_the_canonical_registry(self) -> None:
@@ -412,23 +417,41 @@ class TestTheGateNameSetIsNotHandMaintained:
 
         assert gate_runner_gates() == VALID_GATE_NAMES
 
-    def test_incident_evals_is_reachable(self) -> None:
-        """The specific name the mirror had fallen behind on."""
-        assert "incident_evals" in gate_runner_gates()
+    def test_incident_evals_was_removed_not_mirrored(self) -> None:
+        """#6156's actual fix: delisted, not patched into a second copy.
+
+        The drift this class guards against has two possible remedies: add
+        the missing name to the mirror (what this class was written to
+        force), or decide the name should not be configurable at all and
+        remove it from the one real set. #6156 took the second path --
+        ``incident_evals`` had no dispatch handler and no caller, so keeping
+        it listed only meant a config could name a gate GateRunner refuses.
+        ``gate_runner_gates()`` returns ``VALID_GATE_NAMES`` directly (no
+        mirror to fall behind), so this now simply pins the registry's
+        current, correct state.
+        """
+        assert "incident_evals" not in gate_runner_gates()
 
     def test_a_gate_the_runner_refuses_is_a_miss_not_a_crash(self, tmp_path: Path) -> None:
-        """``incident_evals`` is configurable and undispatchable, and both are true.
+        """A manifest naming an unsupported gate is a corpus miss, not a crash.
 
-        `VALID_GATE_NAMES` is what a configuration may name; GateRunner raises
-        ``Unsupported gate name`` for this one. Catching that is what lets the
-        set stay derived instead of mirrored -- and it is also what stops one
-        such gate from ending the whole benchmark run.
+        Before #6156, ``incident_evals`` was in ``VALID_GATE_NAMES`` with no
+        dispatch handler, so this test named it and exercised
+        ``evaluate_with_gate_runner``'s ``except Exception`` branch -- the
+        one that calls GateRunner, catches its ``Unsupported gate name``
+        ValueError, and reports ``no_gate`` instead of letting the exception
+        end the whole benchmark run. #6156 removed the name rather than
+        adding a handler, so no member of ``VALID_GATE_NAMES`` reaches that
+        branch any more (the invariant the registry now enforces is exactly
+        "every listed name dispatches"). A name absent from the set entirely
+        hits the earlier, cheaper check instead -- still a miss, just
+        reported before GateRunner is even constructed.
         """
-        case = _write_case(tmp_path, "incident_case", gate="incident_evals", files={})
+        case = _write_case(tmp_path, "unsupported_case", gate="not_a_real_gate", files={})
         result = evaluate_with_gate_runner(case)
         assert result.caught is False
         assert result.actual_verdict == "no_gate"
-        assert "Unsupported gate name" in result.details
+        assert "no gate named" in result.details
 
     def test_a_gate_that_raises_for_any_other_reason_is_also_a_miss(self, tmp_path: Path) -> None:
         """A missing API key is a gate that could not run, not a benchmark failure."""

@@ -59,14 +59,19 @@ def gate_runner_gates() -> frozenset[str]:
     real measurement or an unmeasurable one, and a hand-written copy of it
     drifts. It did: ``incident_evals`` was in ``VALID_GATE_NAMES`` and not in
     the mirror, so a case naming it would have been charged to the corpus
-    rather than to the copy that had fallen behind.
+    rather than to the copy that had fallen behind. Returning
+    ``VALID_GATE_NAMES`` directly, rather than a second list, is what keeps
+    that from happening again.
 
-    This is the set a configuration may *name*, which is not quite the set
-    GateRunner can *dispatch*: ``incident_evals`` passes config validation
-    and then raises ``Unsupported gate name`` when it runs. The difference is
-    handled where it shows up -- ``evaluate_with_gate_runner`` catches that
-    refusal and reports ``no_gate`` -- rather than by keeping a second list
-    here that would drift the same way the first one did.
+    This set is not guaranteed to equal what GateRunner can actually
+    *dispatch* -- a name can pass config validation and still raise
+    ``Unsupported gate name`` at run time if nothing wires a handler for it
+    (``incident_evals`` did exactly this before #6156 removed it from
+    ``VALID_GATE_NAMES`` rather than adding the missing handler, since
+    nothing called it). ``evaluate_with_gate_runner`` catches that refusal
+    and reports ``no_gate`` for whichever name triggers it, so a case naming
+    an unreachable gate is still a clean miss rather than a crashed
+    benchmark run.
 
     Imported inside the function for the same reason every other
     ``core.quality`` import in this module is: ``bench_cli`` imports this
