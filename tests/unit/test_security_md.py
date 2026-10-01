@@ -77,6 +77,23 @@ def test_pyproject_version_is_parseable() -> None:
     assert re.fullmatch(r"\d+\.\d+", minor)
 
 
+def test_project_minor_version_ignores_a_prerelease_patch_suffix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A pre-release version like ``3.21.0a1`` must still resolve to ``3.21``.
+
+    ``_project_minor_version`` only splits on ``.`` and keeps the first two
+    components; it never validates or parses the third, so a PEP 440
+    pre-release suffix on the patch component (``0a1``, ``0rc1``, ...) cannot
+    make the function raise or return the wrong minor line.
+    """
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nversion = "3.21.0a1"\n', encoding="utf-8")
+    monkeypatch.setattr("tests.unit.test_security_md.PYPROJECT", pyproject)
+
+    assert _project_minor_version() == "3.21"
+
+
 def test_supported_versions_table_has_current_minor_marked_yes() -> None:
     minor = _project_minor_version()
     rows = _supported_versions_table()
