@@ -133,6 +133,7 @@ Full per-file module map. `AGENTS.md`'s own "Module map" section links here inst
 | `continue_dev.py`               | Continue.dev CLI adapter |
 | `copilot.py`                    | GitHub Copilot CLI adapter |
 | `council_runner.py`             | Task-level "council of agents" runner |
+| `crew_ingest.py`                | Ingest adapter for role-and-crew agent runtimes (#4965) |
 | `cursor.py`                     | Cursor Agent CLI adapter |
 | `deep_research.py`              | Shared machinery for the deep-research adapters |
 | `deep_research_artifact.py`     | On-disk layout of one deep-research run |
@@ -157,7 +158,7 @@ Full per-file module map. `AGENTS.md`'s own "Module map" section links here inst
 | `http_429_classifier.py`        | Data-driven classifier for HTTP 429 responses |
 | `iac.py`                        | Infrastructure-as-Code (Terraform/Pulumi) adapter for Bernstein |
 | `junie.py`                      | JetBrains Junie CLI adapter |
-| `kilo.py`                       | Kilo CLI adapter (Stackblitz) |
+| `kilo.py`                       | Kilo CLI adapter (Kilo Code) |
 | `kimchi.py`                     | Kimchi CLI adapter (#3100) |
 | `kimi.py`                       | Kimi CLI adapter |
 | `kiro.py`                       | Kiro CLI adapter |

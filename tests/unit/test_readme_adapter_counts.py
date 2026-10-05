@@ -1,26 +1,27 @@
 """Guard the adapter counts the README states against the code they describe.
 
-The README's "supported agents" paragraph makes three countable claims:
+The README's "supported agents" paragraph makes two countable claims:
 
 1. ``docs/adapters/index.md`` carries install commands for N adapters.
 2. ``bernstein integrations list`` enumerates M wired-in adapters.
-3. P of those wired-in adapters are selectable agent adapters.
 
-Both the README's intro paragraph and its at-a-glance bullet restate claim 3
-elsewhere on the page (see below), and the MkDocs Home page (``docs/index.md``)
-restates the same shape of claim again in its own front matter and a feature
-bullet - #6060 was about exactly this class of drift, one restatement at a
-time.
+Both numbers drift silently when an adapter is added or the install matrix
+gains a row. These tests recompute each number from its source - the markdown
+table for N, ``integrations_cmd._enumerate_rows()`` for M - so a stale README
+count fails here instead of shipping as a claim the code cannot back.
 
-All of these numbers drift silently when an adapter is added or the install
-matrix gains a row. These tests recompute each number from its source - the
-markdown table for N, ``integrations_cmd._enumerate_rows()`` for M and the
-total wired-in count, ``registry.selectable_adapter_names()`` for the
-selectable count - so a stale count fails here instead of shipping as a claim
-the code cannot back.
+When the count legitimately changes, update the README sentence and these
+tests will pass again.
 
-When a count legitimately changes, update the README/``docs/index.md``
-sentence and these tests will pass again.
+Lower bounds elsewhere
+----------------------
+The README header, its at-a-glance bullet and the MkDocs Home page
+(``docs/index.md``: its front-matter ``description`` and the "Any agent, any
+model" feature bullet) restate the adapter count as floors - "50+ more",
+"More than 50" - so adding an adapter never makes them false. They are
+checked only for overreach: a floor raised above what the registry backs
+fails here. ``docs/index.md``'s two floors used to go unchecked entirely
+(#6060, #6167 review).
 
 Translated pages
 ----------------
@@ -54,19 +55,6 @@ English writes the word "two" - so an exact set comparison is not usable.
 Never run ``bernstein readme-l10n sync`` to make a failure here go away: sync
 rebinds structural hashes and does not translate, so it would hide a stale
 number rather than fix it.
-
-**Known gap.** The intro paragraph's, at-a-glance bullet's and
-``docs/index.md``'s counts are checked only on their English source pages,
-not against the 23 translated READMEs (#6167 review). The translated-page
-check above anchors on the localized "supported agents" l10n binding, and
-these restatements live outside that section with no binding of their own
-to anchor a per-page lookup on. A registry bump therefore still forces only
-the English sentences to move; the translated copies of these three
-restatements (unlike claims 1-3 above) can drift again with the whole suite
-green. Left as a follow-up rather than widened here: covering them needs a
-presence check across the whole translated page rather than one located
-section, which trades away some of the specificity the strict, per-section
-check above relies on.
 """
 
 from __future__ import annotations
@@ -84,12 +72,9 @@ README = REPO_ROOT / "README.md"
 ADAPTER_INDEX = REPO_ROOT / "docs" / "adapters" / "index.md"
 I18N_DIR = REPO_ROOT / "docs" / "i18n"
 
-#: The MkDocs Home page. It restates the same "N more"-style claim the
-#: README intro makes (in its front-matter ``description``, the page's SEO
-#: meta text) and a separate "M CLI adapters" feature bullet - #6060 was
-#: about a stale count exactly like these, and merging a fix that leaves
-#: this page's copies stale would close the issue while shipping the same
-#: defect on the site's own front page (#6167 review).
+#: The MkDocs Home page. Its front-matter ``description`` (the page's SEO meta
+#: text) and its "Any agent, any model" feature bullet both restate the
+#: adapter count, as floors.
 DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
 
 #: Translated front pages, sorted so parametrised ids are stable. Globbed
@@ -114,39 +99,6 @@ _CLAIMS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("wired-in", _TOTAL_CLAIM_RE),
     ("selectable", _SELECTABLE_CLAIM_RE),
 )
-
-# "CLI coding agents work out of the box (Claude Code, Codex, Gemini CLI, and 49 more)"
-_INTRO_CLAIM_RE = re.compile(r"Claude Code, Codex, Gemini CLI, and (\d+) more\)")
-# "**Broad and local.** 52 selectable CLI agent adapters, including a generic `--prompt` wrapper"
-_AT_A_GLANCE_CLAIM_RE = re.compile(r"(\d+) selectable CLI agent adapters, including a generic")
-
-# These two restate the "supported agents" section's selectable count earlier
-# on the page (the intro paragraph and the at-a-glance bullet) - the exact
-# claims issue #6060 was filed against. They are intentionally not added to
-# ``_CLAIMS``: that tuple also drives the translated-page check, which looks
-# for claims inside the localized "supported agents" section, and these two
-# live outside it.
-#
-# Neither sentence's number is the raw selectable count, and asserting
-# otherwise would pin an overclaim rather than guard against one (#6167
-# review): the intro names three adapters before "and N more", and those
-# three are themselves members of the selectable set, so N has to be the
-# selectable count *minus* the three named ones, or "3 + N" overstates the
-# total by 3. The at-a-glance bullet's own wording says "including a
-# generic wrapper" rather than "plus" for the same reason: ``generic`` is
-# already one of the 52 selectable names, so "plus" would double-count it.
-
-#: The three adapters the intro paragraph names before "and N more" -- named
-#: so the offset the intro test subtracts cannot drift out of sync with the
-#: sentence silently if the enumerated names ever change.
-_NAMED_IN_INTRO: tuple[str, ...] = ("claude", "codex", "gemini")
-
-# docs/index.md's front-matter description: "Run Claude Code, Codex, Gemini
-# CLI, and 49 more behind one governance surface"
-_DOCS_INDEX_DESCRIPTION_CLAIM_RE = re.compile(r"Claude Code, Codex, Gemini CLI, and (\d+) more behind")
-# docs/index.md's "Any agent, any model" feature bullet: "52 CLI adapters:
-# Claude Code, Codex, ..."
-_DOCS_INDEX_FEATURE_CLAIM_RE = re.compile(r"(\d+) CLI adapters: Claude Code, Codex")
 
 #: A standalone integer. ``\b`` is unusable here: Python's word boundary is
 #: Unicode-aware and a Bengali letter is a word character, so ``\b52\b`` does
@@ -229,74 +181,50 @@ def test_readme_selectable_adapter_count_matches_the_registry() -> None:
     assert _claimed(_SELECTABLE_CLAIM_RE) == len(selectable_adapter_names())
 
 
-def test_readme_intro_adapter_count_matches_the_registry() -> None:
-    """The intro paragraph's "N more" count equals the selectable set minus the three named adapters (#6060, #6167).
+def test_readme_lower_bound_claims_do_not_overtake_the_registry() -> None:
+    """The header and at-a-glance bullet state floors, never exact counts.
 
-    The intro and the at-a-glance bullet both restate the "supported agents"
-    section's selectable count elsewhere on the page. Nothing checked either
-    copy against the registry, so they could drift independently of the
-    section-level guards above.
-
-    "N more" is additive to the three adapters the sentence already names, so
-    N has to exclude them: asserting N against the raw selectable count would
-    pin a sentence that overstates the total by ``len(_NAMED_IN_INTRO)`` (#6167
-    review) - correct today only because the overclaim happened to read the
-    same as another number, not because the arithmetic was right.
+    Exact counts live in the supported-agents paragraph, where the tests above
+    own them. Elsewhere the README says "and 50+ more" and "More than 50
+    selectable CLI agent adapters", which stay true as adapters are added; this
+    fails only when a floor is raised above what the registry can back.
     """
     from bernstein.adapters.registry import selectable_adapter_names
 
-    assert _claimed(_INTRO_CLAIM_RE) == len(selectable_adapter_names()) - len(_NAMED_IN_INTRO)
+    text = README.read_text(encoding="utf-8")
+    selectable = len(selectable_adapter_names())
+
+    more = re.findall(r"Gemini CLI, and (\d+)\+ more", text)
+    assert len(more) == 1, f"expected exactly one 'and N+ more' header claim, got {more}"
+    # Three agents are named before the floor.
+    assert 3 + int(more[0]) <= selectable
+
+    more_than = re.findall(r"More than (\d+) selectable CLI agent adapters", text)
+    assert len(more_than) == 1, f"expected exactly one 'More than N selectable' claim, got {more_than}"
+    assert int(more_than[0]) < selectable
 
 
-def test_readme_at_a_glance_adapter_count_matches_the_registry() -> None:
-    """The at-a-glance bullet's selectable-adapter count equals the registry's selectable set (#6060).
+def test_docs_index_lower_bound_claims_do_not_overtake_the_registry() -> None:
+    """The MkDocs Home page states the same floors, checked the same way.
 
-    ``generic`` is itself one of the selectable names, so the bullet has to
-    say the count *includes* it rather than count it a second time with
-    "plus" (#6167 review) - the number is the raw selectable count either
-    way, but only the "including" wording is true of it.
+    ``docs/index.md`` restates the README header's "and N+ more" in its
+    front-matter ``description`` and carries its own "N+ CLI adapters" feature
+    bullet. Nothing checked either, so the site's front page could promise
+    more adapters than the registry selects (#6060, #6167 review).
     """
     from bernstein.adapters.registry import selectable_adapter_names
 
-    assert _claimed(_AT_A_GLANCE_CLAIM_RE) == len(selectable_adapter_names())
+    text = DOCS_INDEX.read_text(encoding="utf-8")
+    selectable = len(selectable_adapter_names())
 
+    more = re.findall(r"Gemini CLI, and (\d+)\+ more", text)
+    assert len(more) == 1, f"expected exactly one 'and N+ more' description claim, got {more}"
+    # Three agents are named before the floor.
+    assert 3 + int(more[0]) <= selectable
 
-def test_named_in_intro_are_all_selectable() -> None:
-    """``_NAMED_IN_INTRO`` must name adapters the registry actually selects.
-
-    The intro test's subtraction is only correct while every name it
-    subtracts is itself counted in ``len(selectable_adapter_names())``; a
-    rename or removal that desyncs the constant from the sentence would
-    otherwise make the intro test's arithmetic wrong in a way nothing here
-    would notice.
-    """
-    from bernstein.adapters.registry import selectable_adapter_names
-
-    selectable = selectable_adapter_names()
-    missing = [name for name in _NAMED_IN_INTRO if name not in selectable]
-    assert not missing, f"{missing} named in the intro sentence but not in selectable_adapter_names(): {selectable}"
-
-
-def test_docs_index_description_adapter_count_matches_the_registry() -> None:
-    """The MkDocs Home page's SEO ``description`` restates the intro's "N more" claim (#6167 review).
-
-    #6060 was about the README's count falling behind the registry; the same
-    sentence shape ships in this page's front matter too, and nothing
-    checked it. Same arithmetic as the README intro: the three named
-    adapters are already selectable, so "N more" excludes them.
-    """
-    from bernstein.adapters.registry import selectable_adapter_names
-
-    claimed = _claimed(_DOCS_INDEX_DESCRIPTION_CLAIM_RE, page=DOCS_INDEX)
-    assert claimed == len(selectable_adapter_names()) - len(_NAMED_IN_INTRO)
-
-
-def test_docs_index_feature_bullet_adapter_count_matches_the_registry() -> None:
-    """The MkDocs Home page's "Any agent, any model" bullet states the selectable-adapter count (#6167 review)."""
-    from bernstein.adapters.registry import selectable_adapter_names
-
-    claimed = _claimed(_DOCS_INDEX_FEATURE_CLAIM_RE, page=DOCS_INDEX)
-    assert claimed == len(selectable_adapter_names())
+    adapters = re.findall(r"(\d+)\+ CLI adapters:", text)
+    assert len(adapters) == 1, f"expected exactly one 'N+ CLI adapters:' feature claim, got {adapters}"
+    assert int(adapters[0]) <= selectable
 
 
 def test_install_matrix_is_a_subset_claim_not_a_full_one() -> None:

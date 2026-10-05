@@ -24,7 +24,7 @@ overrides = [{ name = "pyjwt", specifier = ">=2.14" }]
 
 [[package]]
 name = "agentrust-trace"
-version = "0.10.0"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -34,14 +34,14 @@ dependencies = [
     { name = "rfc3986-validator" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9f/f1/ed0c602fbbcbf20a01ce5547ab8bf5cc72c0bcd99fd3baf45e2a29b1af32/agentrust_trace-0.10.0.tar.gz", hash = "sha256:e3ef4438ecb8eb9cbbf1aed13d2d409673ef46afe424c8dc579b8ecce79f2b46", size = 492665, upload-time = "2026-09-06T04:34:52.418Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/16/4347e0c4a9091c8e4649fd9903e3b99157cb9bd47e7bb60215a5d39b679f/agentrust_trace-0.11.0.tar.gz", hash = "sha256:8b76de58ec74fad57417093bf7977fe826ce6ade5859b4d5be8ce3938f9fcb35", size = 791437, upload-time = "2026-09-25T23:30:02.218Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/60/99/b7975665d7b9a54b7274f0b4885e488c67be37d289a9b4554ffd71ed6361/agentrust_trace-0.10.0-py3-none-any.whl", hash = "sha256:a82900c426c92f71ec244a13123611953771d232eb02137fec72927225ab472b", size = 64503, upload-time = "2026-09-06T04:34:50.775Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/56/25d6b23d3626293589df7560cf725edbe199f6379351e0596c2ef96403bd/agentrust_trace-0.11.0-py3-none-any.whl", hash = "sha256:7de621eaf795449e365d04967a82a551a18d75c99d248b4a0923f6d593bdb09e", size = 88765, upload-time = "2026-09-25T23:30:00.913Z" },
 ]
 
 [[package]]
 name = "agentrust-trace-tests"
-version = "0.5.1"
+version = "0.6.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -49,9 +49,9 @@ dependencies = [
     { name = "jsonschema" },
     { name = "rfc8785" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/ea/316b440c5b50b07e01cc5ed0257dbaefad5cb5f25a299a533d1228a1eaef/agentrust_trace_tests-0.5.1.tar.gz", hash = "sha256:79e9d98a7106ae1c47b8378c8808be26f1fa34a62779e9f7b0e954cf40a2a19c", size = 132419, upload-time = "2026-08-23T20:49:54.368Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/73/30/a9ae3091c710822af35198b6571cad480f2f0901976b00bb09b8d14951eb/agentrust_trace_tests-0.6.1.tar.gz", hash = "sha256:0cf53e700a7d4070c53eac1f04f5246adc0d1b5f2dc80cc9dc7f39721dba3c34", size = 265968, upload-time = "2026-09-26T21:35:17.159Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/54/804f21e6dda302b5012e9391f677ce1f047f1cff76e03b0b6ce59fcd1a1e/agentrust_trace_tests-0.5.1-py3-none-any.whl", hash = "sha256:5c13421d41357a5b2e096eced457f5dee65d4921b253b25dac53684b3d31eeeb", size = 28494, upload-time = "2026-08-23T20:49:53.11Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/c1/294f5339c7649af4e195a064ad2d0ff3db24cbf9e034546e647a27153c1a/agentrust_trace_tests-0.6.1-py3-none-any.whl", hash = "sha256:f7e7c994ab1d43a56e8a29febfc75cdfbb1ab78f35df0b5d17ee606a12eb3c34", size = 56183, upload-time = "2026-09-26T21:35:15.867Z" },
 ]
 
 [[package]]
@@ -424,7 +424,7 @@ wheels = [
 
 [[package]]
 name = "bernstein"
-version = "3.20.0"
+version = "3.21.0"
 source = { editable = "." }
 dependencies = [
     { name = "asn1crypto" },
@@ -458,6 +458,7 @@ dependencies = [
     { name = "starlette" },
     { name = "terminaltexteffects" },
     { name = "textual" },
+    { name = "tzdata" },
     { name = "uvicorn" },
     { name = "watchdog" },
     { name = "websockets" },
@@ -634,8 +635,8 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentrust-trace", marker = "extra == 'trace'", specifier = ">=0.10,<0.11" },
-    { name = "agentrust-trace-tests", marker = "extra == 'dev'", specifier = ">=0.5,<0.6" },
+    { name = "agentrust-trace", marker = "extra == 'trace'", specifier = ">=0.11,<0.12" },
+    { name = "agentrust-trace-tests", marker = "extra == 'dev'", specifier = ">=0.6,<0.7" },
     { name = "aiohttp", marker = "extra == 'slack'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'teams'", specifier = ">=3.9" },
     { name = "asn1crypto", specifier = ">=1.5" },
@@ -735,6 +736,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12.20260724" },
     { name = "types-qrcode", marker = "extra == 'dev'", specifier = ">=8.2.0.20260518" },
     { name = "types-reportlab", marker = "extra == 'dev'", specifier = ">=4.5.1.20260724" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn", specifier = ">=0.30" },
     { name = "watchdog", specifier = ">=4.0" },
     { name = "websockets", specifier = ">=14.0" },
@@ -787,7 +789,7 @@ docs = [
     { name = "mkdocs", specifier = ">=1.6.1,<2" },
     { name = "mkdocs-material", specifier = ">=9.7.7,<10" },
     { name = "mkdocs-minify-plugin", specifier = ">=0.8,<1" },
-    { name = "mkdocs-redirects", specifier = ">=1.2,<1.2.4" },
+    { name = "mkdocs-redirects", specifier = ">=1.2,<1.2.3" },
 ]
 
 [[package]]
@@ -3145,15 +3147,14 @@ wheels = [
 
 [[package]]
 name = "mkdocs-redirects"
-version = "1.2.3"
+version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "mkdocs" },
-    { name = "properdocs" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/73/25/49725f78ca5d3026b09973f7a2b3a8b179cc2e8c15e43d5a13bc79f6b274/mkdocs_redirects-1.2.3.tar.gz", hash = "sha256:5e980330999299729a2d6a125347d1af78023d68a23681a4de3053ce7dfe2e51", size = 7712, upload-time = "2026-03-28T13:57:41.766Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/a8/6d44a6cf07e969c7420cb36ab287b0669da636a2044de38a7d2208d5a758/mkdocs_redirects-1.2.2.tar.gz", hash = "sha256:3094981b42ffab29313c2c1b8ac3969861109f58b2dd58c45fc81cd44bfa0095", size = 7162, upload-time = "2024-11-07T14:57:21.109Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/90/871b1cddc01d2ba1637b858eeeabc2e3013dc8df591306b5567b98ef0870/mkdocs_redirects-1.2.3-py3-none-any.whl", hash = "sha256:ec7312fff462d03ec16395d0c001006a418f8d0c21cdf2b47ff11cf839dc3ce0", size = 6245, upload-time = "2026-03-28T13:57:40.466Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/ec/38443b1f2a3821bbcb24e46cd8ba979154417794d54baf949fefde1c2146/mkdocs_redirects-1.2.2-py3-none-any.whl", hash = "sha256:7dbfa5647b79a3589da4401403d69494bd1f4ad03b9c15136720367e1f340ed5", size = 6142, upload-time = "2024-11-07T14:57:19.143Z" },
 ]
 
 [[package]]
@@ -3560,11 +3561,11 @@ wheels = [
 
 [[package]]
 name = "oauthlib"
-version = "3.3.1"
+version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/5f/19930f824ffeb0ad4372da4812c50edbd1434f678c90c2733e1188edfc63/oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9", size = 185918, upload-time = "2025-06-19T22:48:08.269Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/d8/a1bcc8ba112a627f8ffbdc212a78ce18d3ac07e91a5ca65d27918eee25a1/oauthlib-4.0.0.tar.gz", hash = "sha256:efb274799819440f95b4ab3b818869f1ce9ae26c5beacba0201d1a1b76b54f86", size = 187232, upload-time = "2026-09-28T06:01:18.77Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/9c/92789c596b8df838baa98fa71844d84283302f7604ed565dafe5a6b5041a/oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1", size = 160065, upload-time = "2025-06-19T22:48:06.508Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/f4/78229a1066068ca14fc60fb26cf7381cabe4382261392b90e5f9552722d4/oauthlib-4.0.0-py3-none-any.whl", hash = "sha256:624c28c13a0a59cabf9747dfa52af63be3e512a7f2714df16e91b5b3a145e6cd", size = 159715, upload-time = "2026-09-28T06:01:17.008Z" },
 ]
 
 [[package]]
@@ -4104,29 +4105,6 @@ wheels = [
 ]
 
 [[package]]
-name = "properdocs"
-version = "1.6.7"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "colorama", marker = "sys_platform == 'win32' or (extra == 'extra-9-bernstein-grpc' and extra == 'extra-9-bernstein-modal') or (extra == 'extra-9-bernstein-modal' and extra == 'extra-9-bernstein-otel')" },
-    { name = "ghp-import" },
-    { name = "jinja2" },
-    { name = "markdown" },
-    { name = "markupsafe" },
-    { name = "packaging" },
-    { name = "pathspec" },
-    { name = "platformdirs" },
-    { name = "pyyaml" },
-    { name = "pyyaml-env-tag" },
-    { name = "watchdog" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/29/f27a4e1eddf72ed3db6e47818fbafe6debbf09fd7051f9c1a007239b46ef/properdocs-1.6.7.tar.gz", hash = "sha256:adc7b16e562890af0e098a7e5b02e3a81c20894a87d6a28d345c9300de73c26e", size = 276141, upload-time = "2026-03-20T20:07:48.167Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/4d/fc923f5c85318ee8cc903566dc4e0ebe41b2dfc1d2ecf5546db232397ed6/properdocs-1.6.7-py3-none-any.whl", hash = "sha256:6fa0cfa2e01bf338f684892c8a506cf70ea88ae7f3479c933b6fa20168101cbd", size = 225406, upload-time = "2026-03-20T20:07:46.875Z" },
-]
-
-[[package]]
 name = "proto-plus"
 version = "1.27.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4539,11 +4517,11 @@ wheels = [
 
 [[package]]
 name = "pypdf"
-version = "6.18.1"
+version = "6.19.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4f/c2/e537e78a8282b51ed47031566be118debbc34c04782a9afd8739672eb07d/pypdf-6.18.1.tar.gz", hash = "sha256:2441fc839053745638d9b9ddb38ed66beed8d611f47a3036c9838fc4e3074dea", size = 7027577, upload-time = "2026-09-11T10:10:07.616Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/ac/63d71aaedb59acbcdef491e6ca6469165e3771c9c74358204818fd9bc5a6/pypdf-6.19.0.tar.gz", hash = "sha256:bbc43aca292369ccc6cbc8a921991ecf2538a3587ab5a116eff06c321d647155", size = 7033266, upload-time = "2026-09-16T09:32:05.946Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/13/645df3995075112cb3cce15e8797c205f0f88fb50acc11012b84b071bc22/pypdf-6.18.1-py3-none-any.whl", hash = "sha256:ee93a2665670ecf57ee81d197a4ca548f3dc15f9cefc56e59b8140866aaa3de5", size = 394327, upload-time = "2026-09-11T10:10:06.103Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/2c/c43c03eaf630435f023f1dc61ec4a4a78951ad5530a62c71cc89bde307b7/pypdf-6.19.0-py3-none-any.whl", hash = "sha256:7e5d6e730e7dae87d560a2cee218b852f6498c8be61966f3cd02ead971e48d14", size = 395480, upload-time = "2026-09-16T09:32:04.087Z" },
 ]
 
 [[package]]
