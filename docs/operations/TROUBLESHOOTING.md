@@ -613,6 +613,44 @@ fails verification with the cause named.
 
 ---
 
+## 23. QA Tasks Fail with "Failed to spawn: ruff" in a Non-Python Repository
+
+**Symptom:** Every QA-role task in a repository that is not Python (for
+example TypeScript on Bun) fails, is retried, and fails identically. The agent
+log shows `error: Failed to spawn: ruff` or `command not found`. See issue
+[#6138](https://github.com/sipyourdrink-ltd/bernstein/issues/6138).
+
+**Cause:** The built-in QA role prompt (`templates/roles/qa/`) used to tell
+every QA agent to run `uv run ruff check src/` unconditionally. In a
+repository without Python or `ruff` the agent followed that instruction, the
+spawn failed, and nothing about the code under test was wrong. The QA prompt
+now tells the agent to find and use the repository's own lint, format and test
+commands, and names `ruff` and `scripts/run_tests.py` only when the repository
+uses them.
+
+**Diagnosis:**
+```bash
+grep -n "ruff\|uv run" .sdd/runtime/<session>.log   # which command was run
+```
+
+**Resolution:**
+- Upgrade to a release that includes the neutral QA prompt.
+- The other built-in role prompts (`backend`, `frontend`, `devops`, ...) still
+  name the Python toolchain. If an agent in one of those roles fails the same
+  way, add a `critical` entry to `.sdd/recommendations.yaml` that names the
+  repository's real toolchain; it reaches every role:
+  ```yaml
+  recommendations:
+    - id: toolchain
+      category: verification
+      severity: critical
+      text: 'This repository is TypeScript on Bun. Never run ruff, uv or pytest; use bun.'
+      applies_to: []   # empty = every role
+  ```
+  The top-level `recommendations:` key is required; a bare list is ignored.
+
+---
+
 ## Quick Reference: Exit Codes
 
 | Exit code | Meaning | Likely cause |
