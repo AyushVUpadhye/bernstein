@@ -17,12 +17,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
+import pytest
+
+from bernstein.core.persistence.chain_checkpoint import latest_pointer_path, record_checkpoint
+from bernstein.core.persistence.merkle import compute_seal
 from bernstein.core.persistence.tiles import (
     generate_tiles,
     has_hash_tile,
-    read_hash_tile,
+    render_hash_tile,
     tile_hash_path,
 )
 from bernstein.core.security.audit import (
@@ -109,7 +118,12 @@ def _make_chain(audit_dir: Path, *, key: bytes, segments: int, events_per: int) 
 
 
 def _seal_segments(audit_dir: Path, contents: dict[str, bytes], key: bytes) -> dict:
-    """Generate hash tiles for every segment in *contents*."""
+    """Write hash tiles for the segments in *contents*, with no signed checkpoint.
+
+    The tiles describe the bytes correctly but nothing signs them, so they
+    grant no trust: every segment is still walked. Tests that exercise
+    trusted prefixes use :func:`_seal` instead.
+    """
     leaves = []
     for name, body in contents.items():
         leaves.append(
@@ -131,23 +145,19 @@ def _seal_segments(audit_dir: Path, contents: dict[str, bytes], key: bytes) -> d
         "sealed_at_iso": "2026-08-24T00:00:00Z",
     }
     generate_tiles(audit_dir, seal)
-    # Each tile needs an end_hmac so the incremental verifier can adopt the
-    # chain head. We compute the head by walking the chain ourselves.
-    prev = "0" * 64
-    for name in sorted(contents):
-        # read the last hmac directly
-        text = contents[name].decode("utf-8")
-        for line in reversed(text.splitlines()):
-            entry = json.loads(line)
-            if "hmac" in entry:
-                end_hmac = entry["hmac"]
-                break
-        else:
-            end_hmac = prev
-        tile = read_hash_tile(audit_dir, name) or {}
-        tile["end_hmac"] = end_hmac
-        # rewrite the tile
-        tile_hash_path(audit_dir, name).write_text(json.dumps(tile, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return seal
+
+
+def _seal(audit_dir: Path, key: bytes) -> dict:
+    """Seal *audit_dir* the way ``bernstein audit seal`` does.
+
+    ``compute_seal`` verifies the chain, ``generate_tiles`` publishes the hash
+    tiles, and ``record_checkpoint`` signs the pin the incremental verifier
+    trusts.
+    """
+    _tree, seal = compute_seal(audit_dir, key=key)
+    generate_tiles(audit_dir, seal)
+    record_checkpoint(audit_dir, seal, key=key)
     return seal
 
 
@@ -296,7 +306,8 @@ def test_hash_tile_with_non_string_sha256_falls_through(tmp_path: Path) -> None:
     """A non-string content_sha256 is not a valid content address.
 
     The tile cannot be trusted to describe the bytes, so the verifier must
-    fall through to reading the live segment.
+    fall through to reading the live segment, and it reports the tile by
+    name instead of passing over it.
     """
     key = b"test-key-for-tile-verify"
     audit_dir = tmp_path / "audit"
@@ -327,10 +338,12 @@ def test_hash_tile_with_non_string_sha256_falls_through(tmp_path: Path) -> None:
     report = log.verify_incremental()
 
     # The non-string content_sha256 triggers a fallthrough to the live
-    # segment, which is intact: the verify succeeds, but the report says
-    # the segment was re-read (it could not be trusted).
-    assert report.ok, f"verify should succeed: {report.errors}"
+    # segment, which is intact, so the only finding is the tile itself.
     assert report.segments_re_read >= 1, "non-string content_sha256 must not be trusted; live segment should be re-read"
+    assert report.errors == [
+        f"tiles/{name}.tile: malformed hash tile (needs integer byte_len and scheme, string hashes)"
+    ]
+    assert not report.ok
 
 
 # ---------------------------------------------------------------------------
@@ -352,8 +365,8 @@ def test_incremental_verify_reads_only_changed_tiles(tmp_path: Path) -> None:
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
 
-    chain = _make_chain(audit_dir, key=key, segments=3, events_per=2)
-    _seal_segments(audit_dir, chain["contents"], key)
+    _make_chain(audit_dir, key=key, segments=3, events_per=2)
+    _seal(audit_dir, key)
 
     # First run: cold, every segment is read for the trust check.
     log = AuditLog(audit_dir, key=key)
@@ -501,3 +514,395 @@ def test_verify_incremental_reports_tile_count(tmp_path: Path) -> None:
     assert report.tiles_read == 0
     assert report.tiles_trusted == 0
     assert report.segments_re_read == 0
+
+
+# ---------------------------------------------------------------------------
+# Trust is anchored on the signed checkpoint, never on a tile (issue #3160).
+# Every test below seals through the real path (compute_seal ->
+# generate_tiles -> record_checkpoint) rather than hand-writing tiles.
+# ---------------------------------------------------------------------------
+
+
+def _append(audit_dir: Path, key: bytes, *, day: str, count: int) -> None:
+    """Append *count* records to the ``<day>.jsonl`` segment."""
+    import bernstein.core.security.audit as audit_mod
+
+    instants = [_FakeInstant(f"{day}T13:00:{i:02d}.000000Z", day) for i in range(count)]
+    real_datetime = audit_mod.datetime
+    audit_mod.datetime = _FakeDatetime(instants)  # type: ignore[assignment]
+    try:
+        log = AuditLog(audit_dir, key=key)
+        for i in range(count):
+            log.log(
+                event_type="test.append",
+                actor="tile-verify-test",
+                resource_type="segment",
+                resource_id=f"{day}-append-{i}",
+                details={"n": i},
+            )
+    finally:
+        audit_mod.datetime = real_datetime  # type: ignore[assignment]
+
+
+def _segments(audit_dir: Path) -> list[Path]:
+    return sorted(audit_dir.glob("*.jsonl"))
+
+
+def _flip(path: Path, offset: int) -> None:
+    data = bytearray(path.read_bytes())
+    data[offset] ^= 0x01
+    path.write_bytes(bytes(data))
+
+
+def _sealed_log(tmp_path: Path, *, segments: int = 3, events_per: int = 4) -> tuple[Path, bytes]:
+    key = b"test-key-checkpoint-anchored-trust"
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir(parents=True)
+    _make_chain(audit_dir, key=key, segments=segments, events_per=events_per)
+    _seal(audit_dir, key)
+    return audit_dir, key
+
+
+def _edit_first_actor(segment: Path) -> bytes:
+    """Rewrite one record's actor in place, the edit a key-less attacker can make."""
+    edited = segment.read_bytes().replace(b'"tile-verify-test"', b'"someone-else-xx"', 1)
+    segment.write_bytes(edited)
+    return edited
+
+
+def test_a_forged_tile_cannot_hide_an_edited_record(tmp_path: Path) -> None:
+    """Rewriting a tile to match an edited segment needs no key, so it must not buy trust."""
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=3)
+    segment = _segments(audit_dir)[0]
+    edited = _edit_first_actor(segment)
+    tile_hash_path(audit_dir, segment.name).write_bytes(
+        render_hash_tile(
+            segment=segment.name,
+            leaf_hash=hashlib.sha256(b"\x00" + edited).hexdigest(),
+            byte_len=len(edited),
+            content_sha256=hashlib.sha256(edited).hexdigest(),
+            scheme=2,
+        )
+    )
+
+    full_ok, full_errors = AuditLog(audit_dir, key=key).verify()
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert not full_ok
+    assert not report.ok
+    assert report.tiles_trusted == 0
+    assert report.errors == full_errors
+
+
+def test_an_honest_append_after_a_seal_verifies(tmp_path: Path) -> None:
+    """Appending to a sealed segment is what a live log does; it is not tampering."""
+    audit_dir, key = _sealed_log(tmp_path)
+    _append(audit_dir, key, day=_segments(audit_dir)[-1].stem, count=2)
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert report.ok, report.errors
+    assert report.tiles_trusted == 3
+    assert report.segments_re_read == 0
+    assert report.records_walked == 2
+
+
+@pytest.mark.parametrize(("segments", "events_per"), [(2, 2), (8, 5)])
+def test_incremental_verify_walks_only_the_appended_records(tmp_path: Path, segments: int, events_per: int) -> None:
+    """The records walked after N appends is N, whatever the size of the sealed history."""
+    audit_dir, key = _sealed_log(tmp_path, segments=segments, events_per=events_per)
+    assert AuditLog(audit_dir, key=key).force_full_verify() == (True, [])
+
+    _append(audit_dir, key, day=_segments(audit_dir)[-1].stem, count=3)
+    _append(audit_dir, key, day="2026-09-01", count=2)
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert report.ok, report.errors
+    assert report.records_walked == 5
+    assert report.tiles_trusted == segments
+    # Only the brand-new segment, which no checkpoint pins yet, is walked whole.
+    assert report.segments_re_read == 1
+    assert not report.run_was_full
+
+
+def test_a_log_with_no_checkpoint_is_walked_in_full(tmp_path: Path) -> None:
+    """History from before checkpoints existed still verifies, with no shortcut."""
+    key = b"test-key-no-checkpoint"
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    _make_chain(audit_dir, key=key, segments=3, events_per=2)
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert report.ok, report.errors
+    assert report.tiles_trusted == 0
+    assert report.run_was_full
+    assert report.records_walked == 6
+
+
+def _damage_appended_record(audit_dir: Path) -> None:
+    newest = _segments(audit_dir)[-1]
+    _flip(newest, len(newest.read_bytes()) - 20)
+
+
+def _damage_sealed_prefix(audit_dir: Path) -> None:
+    _flip(_segments(audit_dir)[1], 30)
+
+
+def _tear_the_tail(audit_dir: Path) -> None:
+    newest = _segments(audit_dir)[-1]
+    newest.write_bytes(newest.read_bytes()[:-15])
+
+
+def _delete_first_segment(audit_dir: Path) -> None:
+    _segments(audit_dir)[0].unlink()
+
+
+def _drop_a_sealed_record(audit_dir: Path) -> None:
+    middle = _segments(audit_dir)[1]
+    lines = middle.read_bytes().splitlines(keepends=True)
+    middle.write_bytes(b"".join(lines[:1] + lines[2:]))
+
+
+def _edit_inside_a_sealed_prefix(audit_dir: Path) -> None:
+    """Damage a record between the first and last of a sealed prefix, keeping its length."""
+    middle = _segments(audit_dir)[1]
+    lines = middle.read_bytes().splitlines(keepends=True)
+    _flip(middle, len(lines[0]) + len(lines[1]) // 2)
+
+
+@pytest.mark.parametrize("with_tiles", [True, False], ids=["tiles", "no-tiles"])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        _damage_appended_record,
+        _damage_sealed_prefix,
+        _edit_inside_a_sealed_prefix,
+        _tear_the_tail,
+        _delete_first_segment,
+        _drop_a_sealed_record,
+    ],
+)
+def test_incremental_verify_reports_exactly_what_a_full_verify_reports(
+    tmp_path: Path, damage: Callable[[Path], None], with_tiles: bool
+) -> None:
+    """Trusting a pinned prefix never hides a finding, and findings keep segment-absolute lines.
+
+    Without tiles (the orchestrator's shutdown seal publishes none) the signed
+    checkpoint is the only thing standing between a trusted prefix and an
+    unchecked edit.
+    """
+    audit_dir, key = _sealed_log(tmp_path)
+    if not with_tiles:
+        for tile in (audit_dir / "tiles").glob("*.tile"):
+            tile.unlink()
+    _append(audit_dir, key, day=_segments(audit_dir)[-1].stem, count=3)
+    damage(audit_dir)
+
+    full_ok, full_errors = AuditLog(audit_dir, key=key).verify()
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert not full_ok
+    assert (report.ok, report.errors) == (full_ok, full_errors)
+
+
+def test_a_damaged_appended_record_is_named_by_its_line_in_the_segment(tmp_path: Path) -> None:
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=4)
+    newest = _segments(audit_dir)[0]
+    _append(audit_dir, key, day=newest.stem, count=2)
+    _flip(newest, len(newest.read_bytes()) - 20)
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert report.tiles_trusted == 1
+    assert report.records_walked == 2
+    assert report.errors
+    assert all(error.startswith(f"{newest.name}:6:") for error in report.errors), report.errors
+
+
+def test_a_forged_checkpoint_pointer_is_not_a_trust_anchor(tmp_path: Path) -> None:
+    """latest.json is signed; a pointer re-pinned without the key is ignored."""
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=3)
+    edited = _edit_first_actor(_segments(audit_dir)[0])
+    pointer = latest_pointer_path(audit_dir)
+    doc = json.loads(pointer.read_bytes())
+    doc["payload"]["leaves"][0]["hash"] = hashlib.sha256(b"\x00" + edited).hexdigest()
+    pointer.write_bytes(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert not report.ok
+    assert report.tiles_trusted == 0
+
+
+def test_a_flipped_byte_anywhere_in_a_tile_is_reported_naming_the_tile(tmp_path: Path) -> None:
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=3)
+    name = _segments(audit_dir)[0].name
+    tile = tile_hash_path(audit_dir, name)
+    original = tile.read_bytes()
+    assert AuditLog(audit_dir, key=key).verify_incremental().ok
+
+    missed: list[tuple[int, int]] = []
+    for offset in range(len(original)):
+        for bit in (0x01, 0x20):
+            flipped = bytearray(original)
+            flipped[offset] ^= bit
+            tile.write_bytes(bytes(flipped))
+            report = AuditLog(audit_dir, key=key).verify_incremental()
+            if report.ok or not all(error.startswith(f"tiles/{name}.tile: ") for error in report.errors):
+                missed.append((offset, bit))
+    tile.write_bytes(original)
+
+    assert missed == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("content_sha256", "0" * 64, "content_sha256 does not match the first"),
+        ("leaf_hash", "0" * 64, "leaf_hash does not match the first"),
+        ("byte_len", 10**6, "describes 1000000 bytes of"),
+        ("byte_len", "12", "malformed hash tile"),
+        ("scheme", 3, "unsupported seal scheme 3"),
+        ("segment", "2026-01-01.jsonl", "does not match the hash tile for the first"),
+    ],
+)
+def test_a_tile_that_misdescribes_its_segment_names_the_tile(
+    tmp_path: Path, field: str, value: object, expected: str
+) -> None:
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=3)
+    name = _segments(audit_dir)[0].name
+    tile = tile_hash_path(audit_dir, name)
+    doc = json.loads(tile.read_bytes())
+    doc[field] = value
+    tile.write_bytes((json.dumps(doc, indent=2, sort_keys=True) + "\n").encode())
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert not report.ok
+    assert len(report.errors) == 1
+    assert report.errors[0].startswith(f"tiles/{name}.tile: ")
+    assert expected in report.errors[0]
+
+
+def test_a_tile_written_with_windows_line_endings_still_verifies(tmp_path: Path) -> None:
+    """Tiles from releases that wrote platform line endings are not reported."""
+    audit_dir, key = _sealed_log(tmp_path, segments=1, events_per=3)
+    tile = tile_hash_path(audit_dir, _segments(audit_dir)[0].name)
+    tile.write_bytes(tile.read_bytes().replace(b"\n", b"\r\n"))
+
+    report = AuditLog(audit_dir, key=key).verify_incremental()
+
+    assert report.ok, report.errors
+
+
+def test_identical_directories_publish_byte_identical_lf_tiles(tmp_path: Path) -> None:
+    """Tiles are content-addressed bytes, the same on every platform."""
+    first, _key = _sealed_log(tmp_path / "a")
+    second, _key = _sealed_log(tmp_path / "b")
+
+    for segment in _segments(first):
+        one = tile_hash_path(first, segment.name).read_bytes()
+        assert one == tile_hash_path(second, segment.name).read_bytes()
+        assert b"\r" not in one
+        doc = json.loads(one)
+        assert one == render_hash_tile(
+            segment=segment.name,
+            leaf_hash=doc["leaf_hash"],
+            byte_len=doc["byte_len"],
+            content_sha256=doc["content_sha256"],
+            scheme=doc["scheme"],
+        )
+
+
+def _forbid_writes_and_locks(monkeypatch: pytest.MonkeyPatch, root: Path) -> None:
+    """Make every write under *root*, and taking the writer lock, fail loudly."""
+    import builtins
+    import io
+    import os
+
+    import bernstein.core.security.audit as audit_mod
+
+    resolved = str(root.resolve())
+
+    def _guard(target: object) -> None:
+        if str(Path(str(target)).resolve()).startswith(resolved):
+            raise PermissionError(f"read-only audit directory: {target}")
+
+    real_open = builtins.open
+
+    def _open(file: Any, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+        if any(flag in mode for flag in "wax+"):
+            _guard(file)
+        return real_open(file, mode, *args, **kwargs)
+
+    real_os_open = os.open
+    write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+
+    def _os_open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if flags & write_flags:
+            _guard(path)
+        return real_os_open(path, flags, *args, **kwargs)
+
+    def _guarded(real: Callable[..., Any]) -> Callable[..., Any]:
+        def _call(*args: Any, **kwargs: Any) -> Any:
+            for arg in args:
+                _guard(arg)
+            return real(*args, **kwargs)
+
+        return _call
+
+    def _no_lock(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("verification must not take the writer lock")
+
+    monkeypatch.setattr(builtins, "open", _open)
+    monkeypatch.setattr(io, "open", _open)
+    monkeypatch.setattr(os, "open", _os_open)
+    for name in ("replace", "rename", "remove", "unlink", "rmdir", "mkdir"):
+        monkeypatch.setattr(os, name, _guarded(getattr(os, name)))
+    monkeypatch.setattr(audit_mod, "_chain_append_lock", _no_lock)
+
+
+def test_incremental_verify_needs_no_writes_and_no_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audit_dir, key = _sealed_log(tmp_path)
+    _append(audit_dir, key, day=_segments(audit_dir)[-1].stem, count=2)
+    log = AuditLog(audit_dir, key=key)
+
+    _forbid_writes_and_locks(monkeypatch, audit_dir)
+    report = log.verify_incremental()
+    monkeypatch.undo()
+
+    assert report.ok, report.errors
+    assert (report.tiles_trusted, report.records_walked) == (3, 2)
+
+    _flip(_segments(audit_dir)[0], 30)
+    _forbid_writes_and_locks(monkeypatch, audit_dir)
+    damaged = log.verify_incremental()
+    monkeypatch.undo()
+
+    assert not damaged.ok
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_incremental_verify_on_a_read_only_directory(tmp_path: Path) -> None:
+    if sys.platform != "win32" and os.geteuid() == 0:
+        pytest.skip("root ignores permission bits")
+    audit_dir, key = _sealed_log(tmp_path)
+    _append(audit_dir, key, day=_segments(audit_dir)[-1].stem, count=2)
+    log = AuditLog(audit_dir, key=key)
+    dirs = [audit_dir, *(p for p in audit_dir.rglob("*") if p.is_dir())]
+    files = [p for p in audit_dir.rglob("*") if p.is_file()]
+    for path in files:
+        path.chmod(stat.S_IRUSR)
+    for path in dirs:
+        path.chmod(stat.S_IRUSR | stat.S_IXUSR)
+    try:
+        report = log.verify_incremental()
+    finally:
+        for path in dirs:
+            path.chmod(stat.S_IRWXU)
+        for path in files:
+            path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    assert report.ok, report.errors
+    assert (report.tiles_trusted, report.records_walked) == (3, 2)
