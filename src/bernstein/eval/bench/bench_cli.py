@@ -42,12 +42,14 @@ if TYPE_CHECKING:
 def _get_suite(name: str):
     """Resolve a suite name or .json path to a BenchSuite."""
     from bernstein.eval.bench.gate_evasion_suite import build_gate_evasion_suite_v1
+    from bernstein.eval.bench.goal_drift_suite import build_goal_drift_suite
     from bernstein.eval.bench.golden_suite import build_golden_suite_v1
     from bernstein.eval.bench.suite import BenchSuite
     from bernstein.eval.bench.tool_surface_suite import build_tool_surface_suite
 
     _BUILTIN = {
         "gate-evasion-v1": build_gate_evasion_suite_v1,
+        "goal-drift-v1": build_goal_drift_suite,
         "golden-v1": build_golden_suite_v1,
         "tool-surface-v1": build_tool_surface_suite,
     }
@@ -68,9 +70,10 @@ def _get_suite(name: str):
 def _resolve_adapter(suite_obj: BenchSuite) -> ReplayAdapter:
     """The adapter that scores *suite_obj*: the suite's own, else the synthetic mock.
 
-    Only ``tool-surface-v1`` and ``gate-evasion-v1`` have an adapter that derives a verdict
-    from a run. Every other suite (``golden-v1`` and any ``.json`` suite) falls back to
-    ``MockReplayAdapter``, which passes everything; callers must check :func:`_is_synthetic`.
+    Only ``tool-surface-v1``, ``gate-evasion-v1``, and ``goal-drift-v1`` have an adapter
+    that derives a verdict from a run. Every other suite (``golden-v1`` and any ``.json``
+    suite) falls back to ``MockReplayAdapter``, which passes everything; callers must check
+    :func:`_is_synthetic`.
     """
     from bernstein.eval.bench.runner import MockReplayAdapter
 
@@ -82,6 +85,10 @@ def _resolve_adapter(suite_obj: BenchSuite) -> ReplayAdapter:
         from bernstein.eval.bench.gate_evasion_suite import GateEvasionReplayAdapter
 
         return GateEvasionReplayAdapter()
+    if suite_obj.version == "goal-drift-v1":
+        from bernstein.eval.bench.goal_drift_suite import GoalDriftReplayAdapter
+
+        return GoalDriftReplayAdapter()
     return MockReplayAdapter()
 
 
@@ -136,12 +143,17 @@ def _suite_source_uri(name: str) -> str | None:
     """
     import inspect
 
-    from bernstein.eval.bench import golden_suite, tool_surface_suite
+    from bernstein.eval.bench import gate_evasion_suite, goal_drift_suite, golden_suite, tool_surface_suite
 
     path = Path(name)
     if path.suffix == ".json" and path.exists():
         return _repo_relative(path)
-    module = {"golden-v1": golden_suite, "tool-surface-v1": tool_surface_suite}.get(name)
+    module = {
+        "golden-v1": golden_suite,
+        "tool-surface-v1": tool_surface_suite,
+        "gate-evasion-v1": gate_evasion_suite,
+        "goal-drift-v1": goal_drift_suite,
+    }.get(name)
     if module is None:
         return None
     source = inspect.getsourcefile(module)
@@ -210,6 +222,41 @@ def bench_group() -> None:
     help="Stop running tasks once cumulative cost reaches this USD limit. Not combined with --reliability.",
 )
 @click.option(
+    "--trajectory",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to trajectory JSON file (events and diff).",
+)
+@click.option(
+    "--diff",
+    "diff_file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Path to git diff file for goal-drift suite.",
+)
+@click.option(
+    "--threshold",
+    type=float,
+    default=0.0,
+    show_default=True,
+    help="Drift threshold tolerance for goal-drift suite.",
+)
+@click.option(
+    "--require-step-coverage",
+    is_flag=True,
+    default=False,
+    help="Enforce 100% step coverage as a strict gate for goal-drift suite.",
+)
+@click.option(
+    "--smoke-synthetic",
+    is_flag=True,
+    default=False,
+    help=(
+        "Synthesize compliant mock trajectories for plumbing/smoke testing "
+        "(labels adapter synthetic; requires --stub-signer)."
+    ),
+)
+@click.option(
     "--ci",
     is_flag=True,
     default=False,
@@ -249,13 +296,18 @@ def bench_run(
     scheduler: str,
     stub_signer: bool,
     reliability_k: int | None,
-    budget: float | None,
-    ci: bool,
-    sarif_out: str | None,
-    baseline: str | None,
-    regression_threshold: float,
-    repo: str,
-    head_sha: str,
+    budget: float | None = None,
+    trajectory: Path | None = None,
+    diff_file: Path | None = None,
+    threshold: float = 0.0,
+    require_step_coverage: bool = False,
+    smoke_synthetic: bool = False,
+    ci: bool = False,
+    sarif_out: str | None = None,
+    baseline: str | None = None,
+    regression_threshold: float = 0.0,
+    repo: str = "",
+    head_sha: str = "",
 ) -> None:
     """Execute a suite and emit a signed submission bundle.
 
@@ -319,8 +371,30 @@ def bench_run(
         _run_reliability(suite_obj, scheduler, reliability_k, Path(out), stub_signer)
         return
 
-    adapter = _resolve_adapter(suite_obj)
-    scheduler_config: dict[str, Any] = {"scheduler": scheduler}
+    adapter: ReplayAdapter
+    if suite_obj.version == "goal-drift-v1":
+        from bernstein.eval.bench.goal_drift_suite import GoalDriftReplayAdapter
+
+        trajectory_data = None
+        if trajectory is not None:
+            with open(trajectory, encoding="utf-8") as f:
+                trajectory_data = json.load(f)
+        diff_text = None
+        if diff_file is not None:
+            with open(diff_file, encoding="utf-8") as f:
+                diff_text = f.read()
+
+        adapter = GoalDriftReplayAdapter(
+            trajectory_data=trajectory_data,
+            diff_text=diff_text,
+            threshold=threshold,
+            smoke_synthetic=smoke_synthetic,
+            require_step_coverage=require_step_coverage,
+        )
+    else:
+        adapter = _resolve_adapter(suite_obj)
+
+    scheduler_config: dict[str, Any] = {"scheduler": scheduler, "threshold": threshold}
     synthetic = _is_synthetic(adapter)
     if synthetic:
         if not stub_signer:
