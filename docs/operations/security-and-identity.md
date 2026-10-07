@@ -728,6 +728,14 @@ Generator implementation: `core/security/sbom.py` (`SBOMGenerator`,
 the same primitives are exposed as a `bernstein audit` subcommand and as
 gates inside the [Quality pipeline](../architecture/quality-pipeline.md).
 
+How a finding's severity is read: grype reports a rating string per match.
+For osv-scanner, a finding takes the higher of the group's `max_severity`
+(the CVSS base score osv-scanner computes from the record's vectors, rated
+on the CVSS v3 scale: 9.0 and above is critical) and a GitHub advisory's
+own `database_specific.severity` (`MODERATE` reads as medium). A record
+with neither is `unknown`, and the gate blocks only the severities it is
+configured for, so `block_on_critical` does not block an unknown finding.
+
 ## Compliance
 
 Bernstein's compliance posture is a composition of the above primitives
