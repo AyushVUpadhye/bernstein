@@ -39,6 +39,7 @@ from bernstein.core.log_redact import install_pii_filter
 from bernstein.core.orchestration.preflight import (
     _claude_has_oauth_session,
     _codex_has_auth,
+    check_adapter_configured,
     gemini_has_auth,
     preflight_checks,
 )
@@ -1503,6 +1504,12 @@ def _bootstrap_from_goal_impl(
         console.print(f"[green]{_icons.arrow_right}[/green] Created .sdd/ workspace")
     else:
         console.print(f"[green]{_icons.arrow_right}[/green] Workspace ready")
+
+    # An inline goal carries no seed, so the orchestrator subprocess can only learn
+    # its adapter from a concrete ``cli`` or BERNSTEIN_ADAPTER. Checked after the
+    # workspace step so a first-run ``bernstein.yaml`` is already in place, and
+    # before the server and watchdog exist to be left running behind a dead run (#6126).
+    check_adapter_configured(cli, workdir)
 
     with Status("[bold]Loading agent catalog...[/bold]", console=console):
         _discover_catalog(workdir)
