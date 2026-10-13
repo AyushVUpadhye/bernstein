@@ -26,7 +26,7 @@ source = "https://github.com/sipyourdrink-ltd/bernstein/discussions/5524#discuss
 since = "2026-09-05"
 
 [[contributor]]
-login = "PARZIVAL7498"
+login = "BUTTERFINGERS7498"
 opt_in = true
 recommendation = false
 review_before_publish = false
@@ -83,10 +83,10 @@ since = "2026-09-26"
 [[contributor]]
 login = "aeoess"
 opt_in = true
-recommendation = false
+recommendation = true
 review_before_publish = false
 exception = false
-source = "email BRNSTN-PR-LNKD 2026-09-26"
+source = "email BRNSTN-PR-LNKD 2026-09-26; RECOMMENDATION=YES in a second email 2026-10-02"
 since = "2026-09-26"
 
 [[contributor]]
