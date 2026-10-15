@@ -14,6 +14,8 @@ same scoping the `dlp_scan` gate uses. Values such as `user@example.com`,
 `postgres://...@localhost` and `"TEST_..."` are still skipped, and every
 other match on the line is reported. The test-password exemption now covers
 only the assignment (`password = "test"`), so it cannot reach over a real
-token between `password` and a later `"admin"` on the same line. No
-configuration changes; a line with no allowlisted value scans exactly as
-before.
+token between `password` and a later `"admin"` on the same line. The
+address and example-domain markers are anchored, so a real value that only
+contains one (`sysadmin@acme-corp.io`, the `latest@` password in a database
+URL, `ceo@counterexample.com`) is no longer exempt. No configuration
+changes; a line with no allowlisted value scans exactly as before.

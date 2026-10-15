@@ -196,8 +196,12 @@ _SECRET_RULES: list[tuple[str, re.Pattern[str], str, str]] = [
 # hosts). A match is exempt only when it overlaps one of these, i.e. when the
 # benign marker is part of the flagged value: see :func:`_benign_spans`.
 _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?i)example\.com|example\.org|example\.net"),
-    re.compile(r"(?i)test@|user@|admin@|noreply@|no-reply@"),
+    # Anchored so a real host that merely ends in a marker (``counterexample.com``,
+    # ``db.myexample.org``) is not exempt; a subdomain (``api.example.com``) is.
+    re.compile(r"(?i)(?<![\w\-])example\.(?:com|org|net)\b"),
+    # Anchored to the start of the local part, so ``sysadmin@`` is not read as
+    # ``admin@``, nor a ``latest@`` password in a URL's credentials as ``test@``.
+    re.compile(r"(?i)(?<![\w.%+\-])(?:test|user|admin|noreply|no-reply)@"),
     re.compile(r"(?i)placeholder|changeme|your[-_]?api[-_]?key|xxxx"),
     re.compile(r"(?i)localhost|127\.0\.0\.1|0\.0\.0\.0"),
     # Only the assignment itself, so the span cannot stretch over a real secret

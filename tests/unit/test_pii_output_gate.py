@@ -314,6 +314,31 @@ class TestAllowlistIsScopedToTheFlaggedValue:
         assert result.blocked
         assert "github_token" in result.detail
 
+    @pytest.mark.parametrize(
+        ("contains_marker", "is_marker", "rule"),
+        [
+            # ``test@`` inside ``latest@``: a real credential in a real URL.
+            (
+                'DATABASE_URL = "postgres://svc:latest@db.prod.internal:5432/app"',
+                'DATABASE_URL = "postgres://svc:pw@localhost:5432/app"',
+                "connection_string",
+            ),
+            ("owner sysadmin@acme-corp.io", "owner admin@acme-corp.io", "email_address"),
+            ("owner contact.test@acme-corp.io", "owner test@acme-corp.io", "email_address"),
+            ("owner ceo@counterexample.com", "owner ceo@example.com", "email_address"),
+            (
+                'DATABASE_URL = "postgres://svc:pw9x@db.myexample.org:5432/app"',
+                'DATABASE_URL = "postgres://svc:pw9x@db.example.org:5432/app"',
+                "connection_string",
+            ),
+        ],
+    )
+    def test_a_value_that_only_contains_a_marker_is_not_exempt(
+        self, contains_marker: str, is_marker: str, rule: str
+    ) -> None:
+        assert rule in _rules(contains_marker)
+        assert rule not in _rules(is_marker)
+
     def test_a_test_password_does_not_stretch_over_a_real_token(self) -> None:
         line = f'connect(password=pw, token="{_GITHUB_TOKEN}", user="admin")'
 
