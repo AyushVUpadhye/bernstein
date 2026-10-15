@@ -16,6 +16,7 @@ other match on the line is reported. The test-password exemption now covers
 only the assignment (`password = "test"`), so it cannot reach over a real
 token between `password` and a later `"admin"` on the same line. The
 address and example-domain markers are anchored, so a real value that only
-contains one (`sysadmin@acme-corp.io`, the `latest@` password in a database
-URL, `ceo@counterexample.com`) is no longer exempt. No configuration
+contains one (`sysadmin@acme-corp.io`, a database URL whose password is
+`latest`, or is `admin` itself, `ceo@counterexample.com`,
+`jane@example.com.au`) is no longer exempt. No configuration
 changes; a line with no allowlisted value scans exactly as before.

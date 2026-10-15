@@ -64,10 +64,11 @@ Two post-filters reduce false positives before a match is reported:
 ## What is skipped
 
 - Matches that overlap a built-in allowlist value: `example.com/.org/.net`
-  and their subdomains (not a host that merely ends in them, such as
-  `counterexample.com`), addresses whose local part is exactly
-  `test`/`user`/`admin`/`noreply`/`no-reply` (not `sysadmin@` or
-  `contact.test@`), values containing `placeholder`/`changeme`/`your-api-key`/`xxxx`,
+  and their subdomains (not a host that merely contains them, such as
+  `counterexample.com` or `example.com.au`), addresses whose local part is
+  exactly `test`/`user`/`admin`/`noreply`/`no-reply` (not `sysadmin@`,
+  `contact.test@`, or a URL password such as `svc:admin@`), values
+  containing `placeholder`/`changeme`/`your-api-key`/`xxxx`,
   `localhost`/`127.0.0.1`/`0.0.0.0`, and password assignments using known
   test values (`test`/`password`/`changeme`/`secret`/`admin`).
 - Matches that overlap a value carrying a configured `pii_allowlist_prefixes`

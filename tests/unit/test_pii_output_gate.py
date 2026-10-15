@@ -323,6 +323,17 @@ class TestAllowlistIsScopedToTheFlaggedValue:
                 'DATABASE_URL = "postgres://svc:pw@localhost:5432/app"',
                 "connection_string",
             ),
+            # A URL password that *is* a marker: ``svc:admin@`` is a credential.
+            (
+                'DATABASE_URL = "postgres://svc:admin@db.prod.internal:5432/app"',
+                'DATABASE_URL = "postgres://svc:admin@localhost:5432/app"',
+                "connection_string",
+            ),
+            (
+                'DATABASE_URL = "postgres://svc:test@db.prod.internal/app"',
+                'DATABASE_URL = "postgres://svc:test@localhost/app"',
+                "connection_string",
+            ),
             ("owner sysadmin@acme-corp.io", "owner admin@acme-corp.io", "email_address"),
             ("owner contact.test@acme-corp.io", "owner test@acme-corp.io", "email_address"),
             ("owner ceo@counterexample.com", "owner ceo@example.com", "email_address"),
@@ -331,6 +342,8 @@ class TestAllowlistIsScopedToTheFlaggedValue:
                 'DATABASE_URL = "postgres://svc:pw9x@db.example.org:5432/app"',
                 "connection_string",
             ),
+            # ``.com.au`` is a registrable domain of its own, not example.com.
+            ("owner jane@example.com.au", "owner jane@example.com", "email_address"),
         ],
     )
     def test_a_value_that_only_contains_a_marker_is_not_exempt(
@@ -338,6 +351,18 @@ class TestAllowlistIsScopedToTheFlaggedValue:
     ) -> None:
         assert rule in _rules(contains_marker)
         assert rule not in _rules(is_marker)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "contact mailto:test@example.com",
+            "see example.com.",
+            "see https://api.example.com/x",
+            "write to user@example.com.",
+        ],
+    )
+    def test_anchoring_keeps_benign_uses_exempt(self, line: str) -> None:
+        assert _rules(line) == []
 
     def test_a_test_password_does_not_stretch_over_a_real_token(self) -> None:
         line = f'connect(password=pw, token="{_GITHUB_TOKEN}", user="admin")'
