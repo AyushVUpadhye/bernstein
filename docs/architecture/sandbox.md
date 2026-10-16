@@ -553,6 +553,45 @@ Third-party backends must:
 - `bernstein agents sandbox-backends` lists installed backends.
 - `bernstein run --sandbox <name>` selects a backend explicitly.
 
+## Leaked sessions
+
+The spawner destroys each per-spawn session when its exec resolves and chains
+both ends into the audit log: `sandbox.session_create` (with the backend, the
+agent session, and the `task_ids` the spawn ran) and `sandbox.session_destroy`.
+A create with no later destroy is a session Bernstein never tore down - the
+orchestrator died mid-exec, or the backend's `destroy` raised and was only
+logged - and it keeps holding a container, VM, or hosted sandbox.
+
+```bash
+bernstein sandbox leaks            # sessions whose task finished
+bernstein sandbox leaks --all      # also the ones left out, with the reason
+bernstein sandbox leaks --json
+```
+
+A session is listed as leaked only when **every** task it was provisioned for
+is recorded `done`, `failed`, `closed`, or `cancelled` in the task log, read
+through the task store's own replay (latest record wins, so a reopened task
+counts as live). A process-liveness or file-age signal is never used. Every
+other open session is reported as excluded, with the reason:
+
+| Reason | Meaning |
+|---|---|
+| `T-1 is in_progress` (or any non-terminal status, including `orphaned` and `suspended`) | The task can still run; its session is expected to exist. |
+| `no task-store record for T-1` | The task log does not know the task, so nothing proves it finished. |
+| `create record names no owning task` | The create record predates task attribution, or its `task_ids` is malformed. |
+
+The command is read-only: it destroys nothing, writes nothing, and will not
+create an audit key (it fails with an error when the key the chain was written
+under is not available). If the task log cannot be replayed it fails rather
+than listing anything. Sessions created before the spawner recorded
+`task_ids` are always excluded. A task can be recorded finished a moment before
+its exec resolves and the session is destroyed, so a session only seconds old
+may still be mid-teardown: check the age column before acting on it. The sweep
+reads the audit records without re-verifying their HMAC chain; run
+`bernstein audit verify` when the listing will drive a removal. Removing a leaked session is left to the
+backend's own tooling (for example `docker rm`) after checking it holds nothing
+you need.
+
 ## Observability
 
 Sandbox sessions have these Prometheus metrics. `created_total` and
