@@ -25,13 +25,19 @@ reason:
 
 The sweep is read-only. It never destroys a session, never appends to the
 audit chain, never mints an audit key, and never creates a directory.
+
+It reads the sandbox records without re-verifying the HMAC chain. The listing
+is advisory - it gates and removes nothing - so an unverified record can only
+mislead it (a destroy appended without the audit key would hide a leak), and
+``bernstein audit verify``, which rejects such a record, is the step to run
+before a listing drives a removal.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -83,6 +89,9 @@ class OpenSandboxSession:
         agent_session_id: Bernstein agent session the sandbox was provisioned for.
         task_ids: Tasks the spawn ran. Empty when the create record names none.
         created_at: ISO-8601 timestamp of the create record.
+        superseded: True when a later create reused this id before any
+            destroy. The id now names the newer session, so this lifetime can
+            no longer be addressed by it.
     """
 
     sandbox_session_id: str
@@ -90,6 +99,7 @@ class OpenSandboxSession:
     agent_session_id: str
     task_ids: tuple[str, ...]
     created_at: str
+    superseded: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,10 +150,15 @@ def open_sandbox_sessions(events: Iterable[AuditEvent]) -> list[OpenSandboxSessi
     for the same session id, so an id a backend reuses after a destroy is
     tracked per lifetime. A destroy with no create in view (its create aged
     into a segment the caller did not read) is ignored.
+
+    A create for an id that is still open does not replace the earlier
+    lifetime silently: that lifetime is returned as well, marked
+    ``superseded``, and a later destroy closes only the newest one.
     """
     from bernstein.core.security.audit import SANDBOX_SESSION_CREATE, SANDBOX_SESSION_DESTROY
 
     open_by_id: dict[str, OpenSandboxSession] = {}
+    superseded: list[OpenSandboxSession] = []
     for event in events:
         if event.event_type == SANDBOX_SESSION_DESTROY:
             open_by_id.pop(event.resource_id, None)
@@ -151,6 +166,9 @@ def open_sandbox_sessions(events: Iterable[AuditEvent]) -> list[OpenSandboxSessi
         if event.event_type != SANDBOX_SESSION_CREATE or not event.resource_id:
             continue
         details = event.details if isinstance(event.details, dict) else {}
+        earlier = open_by_id.get(event.resource_id)
+        if earlier is not None:
+            superseded.append(replace(earlier, superseded=True))
         open_by_id[event.resource_id] = OpenSandboxSession(
             sandbox_session_id=event.resource_id,
             backend=str(details.get("backend") or "unknown"),
@@ -158,7 +176,7 @@ def open_sandbox_sessions(events: Iterable[AuditEvent]) -> list[OpenSandboxSessi
             task_ids=_task_ids_from_details(details.get("task_ids")),
             created_at=event.timestamp,
         )
-    return list(open_by_id.values())
+    return [*open_by_id.values(), *superseded]
 
 
 def _age_seconds(created_at: str, now: float) -> float | None:
@@ -186,6 +204,16 @@ def classify_open_session(
         now: Unix time the age is measured against.
     """
     age = _age_seconds(session.created_at, now)
+    if session.superseded:
+        # Never leaked, whatever its tasks say: the id now names the newer
+        # session, and acting on this listing by id would reach that one.
+        return SandboxLeakCandidate(
+            session=session,
+            verdict=SandboxLeakVerdict.EXCLUDED,
+            reason="session id was created again before this lifetime was destroyed; it now names the newer session",
+            task_statuses={task_id: task_status(task_id) for task_id in session.task_ids},
+            age_seconds=age,
+        )
     if not session.task_ids:
         return SandboxLeakCandidate(
             session=session,

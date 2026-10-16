@@ -247,6 +247,40 @@ def test_recreated_session_id_after_destroy_is_open_again(tmp_path: Path, audit_
     assert candidate.session.task_ids == ("T-2",)
 
 
+def test_recreated_session_id_without_a_destroy_keeps_both_lifetimes(tmp_path: Path, audit_key: bytes) -> None:
+    """A second create for an open id must not make the first lifetime disappear.
+
+    The earlier lifetime is never listed as leaked: its id now names the newer
+    session, so acting on it by id would reach the wrong one. It is excluded
+    with its reason instead, and the newer lifetime is judged on its own tasks.
+    """
+    _record_task(tmp_path, "T-1", "done")
+    _record_task(tmp_path, "T-2", "done")
+    _record_create(tmp_path, audit_key, "sbx-reused", task_ids=["T-1"])
+    _record_create(tmp_path, audit_key, "sbx-reused", task_ids=["T-2"])
+
+    candidates = sweep_leaked_sandboxes(tmp_path)
+
+    assert [(c.session.task_ids, c.verdict) for c in candidates] == [
+        (("T-2",), SandboxLeakVerdict.LEAKED),
+        (("T-1",), SandboxLeakVerdict.EXCLUDED),
+    ]
+    assert "created again before this lifetime was destroyed" in candidates[1].reason
+
+
+def test_a_destroy_after_an_id_is_reused_closes_only_the_newest_lifetime(tmp_path: Path, audit_key: bytes) -> None:
+    _record_task(tmp_path, "T-1", "done")
+    _record_task(tmp_path, "T-2", "done")
+    _record_create(tmp_path, audit_key, "sbx-reused", task_ids=["T-1"])
+    _record_create(tmp_path, audit_key, "sbx-reused", task_ids=["T-2"])
+    _record_destroy(tmp_path, audit_key, "sbx-reused")
+
+    (candidate,) = sweep_leaked_sandboxes(tmp_path)
+
+    assert candidate.session.task_ids == ("T-1",)
+    assert candidate.verdict is SandboxLeakVerdict.EXCLUDED
+
+
 def test_age_is_measured_from_the_create_record(tmp_path: Path, audit_key: bytes) -> None:
     _record_task(tmp_path, "T-1", "done")
     _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])

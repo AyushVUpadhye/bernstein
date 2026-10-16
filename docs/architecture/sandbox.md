@@ -579,6 +579,7 @@ other open session is reported as excluded, with the reason:
 | `T-1 is in_progress` (or any non-terminal status, including `orphaned` and `suspended`) | The task can still run; its session is expected to exist. |
 | `no task-store record for T-1` | The task log does not know the task, so nothing proves it finished. |
 | `create record names no owning task` | The create record predates task attribution, or its `task_ids` is malformed. |
+| `session id was created again before this lifetime was destroyed; ...` | A later create reused the id with no destroy in between. The id now names the newer session, so this lifetime is never listed as leaked: acting on it by id would reach the newer one. |
 
 The command is read-only: it destroys nothing, writes nothing, and will not
 create an audit key (it fails with an error when the key the chain was written
@@ -586,11 +587,17 @@ under is not available). If the task log cannot be replayed it fails rather
 than listing anything. Sessions created before the spawner recorded
 `task_ids` are always excluded. A task can be recorded finished a moment before
 its exec resolves and the session is destroyed, so a session only seconds old
-may still be mid-teardown: check the age column before acting on it. The sweep
-reads the audit records without re-verifying their HMAC chain; run
-`bernstein audit verify` when the listing will drive a removal. Removing a leaked session is left to the
-backend's own tooling (for example `docker rm`) after checking it holds nothing
-you need.
+may still be mid-teardown: check the age column before acting on it.
+
+The sweep reads the audit records without re-verifying their HMAC chain. That
+is a deliberate boundary, not an omission: the listing is advisory - it gates
+nothing and removes nothing - so its cost stays proportional to the sandbox
+records rather than the whole chain. The price is that an unverified record
+can mislead it; a `sandbox.session_destroy` appended by someone without the
+audit key would hide a real leak from the listing. Run `bernstein audit verify`
+before a listing drives a removal; it rejects such a record. Removing a leaked
+session is left to the backend's own tooling (for example `docker rm`) after
+checking it holds nothing you need.
 
 ## Observability
 
