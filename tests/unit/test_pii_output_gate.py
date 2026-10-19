@@ -377,6 +377,31 @@ class TestAllowlistIsScopedToTheFlaggedValue:
                 f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholder"',
                 "connection_string",
             ),
+            # ``-`` and ``_`` join words too: a ``placeholder-proxy`` host or an
+            # ``app-changeme-2`` database is a real name that contains a marker,
+            # and the connection-string match covers the whole URL.
+            (
+                f'DATABASE_URL = "{_URL_CREDS}placeholder-proxy.prod.internal:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholder"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/app-changeme-2"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/changeme"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/app_placeholder"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholder"',
+                "connection_string",
+            ),
+            # A token that only contains the word is a token; one that starts
+            # with the ``PLACEHOLDER`` value prefix is still a fixture.
+            (
+                'auth_token = "xxx-placeholder-token-xxx"',
+                'auth_token = "placeholder-token"',
+                "generic_api_key",
+            ),
         ],
     )
     def test_a_value_that_only_contains_a_marker_is_not_exempt(
@@ -398,7 +423,9 @@ class TestAllowlistIsScopedToTheFlaggedValue:
             "replace placeholder later",
             'api_key = "your_api_key_here"',
             "token = xxxxxxxxxxxxxxxxxxxx",
-            'auth_token = "xxx-placeholder-token-xxx"',
+            'auth_token = "placeholder-token"',
+            'token = "placeholder"',
+            "SECRET = <changeme>",
         ],
     )
     def test_anchoring_keeps_benign_uses_exempt(self, line: str) -> None:

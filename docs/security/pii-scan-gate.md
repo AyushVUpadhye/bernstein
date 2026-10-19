@@ -70,8 +70,9 @@ Two post-filters reduce false positives before a match is reported:
   `counterexample.com` or `example.com.au`), addresses whose local part is
   exactly `test`/`user`/`admin`/`noreply`/`no-reply` (not `sysadmin@`,
   `contact.test@`, or a URL password such as `svc:admin@`), the whole
-  words `placeholder`/`changeme` (not `/placeholders`; `-` and `_` still
-  separate words), values starting
+  names `placeholder`/`changeme` (not `/placeholders`, a
+  `placeholder-proxy` host or an `app-changeme-2` database: `-` and `_`
+  join words, as in the hosts below), values starting
   `your-api-key`/`your_api_key`, masking runs of `xxxx`, the hosts
   `localhost`/`127.0.0.1`/`0.0.0.0` (not `localhost-proxy`,
   `localhost.prod.internal`, `app_localhost`, `10.0.0.0` or `127.0.0.10`),

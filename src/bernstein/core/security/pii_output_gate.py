@@ -205,12 +205,15 @@ _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
     # after one: neither a ``latest@`` password nor a password that *is* a
     # marker (``svc:admin@``) is read as a benign address.
     re.compile(r"(?i)(?<![\w.%+\-:])(?:test|user|admin|noreply|no-reply)@"),
-    # Whole words, so a word that merely contains one (a ``/placeholders``
-    # database) is not exempt; ``-`` and ``_`` still separate words, so
-    # ``"xxx-placeholder-token-xxx"`` is. ``your_api_key`` is a phrase prefix
-    # (``"your_api_key_here"``) and is anchored at its start only; ``xxxx`` is
-    # a masking run and stays loose.
-    re.compile(r"(?i)(?<![a-z0-9])(?:placeholder|changeme)(?![a-z0-9])|(?<![a-z0-9])your[-_]?api[-_]?key|xxxx"),
+    # Whole names, bounded like the hosts below: ``-`` and ``_`` join words, so
+    # a ``/placeholders`` database, a ``placeholder-proxy`` host or an
+    # ``app-changeme-2`` database is a real name that contains a marker, not a
+    # marker. (A connection-string match covers the whole URL, so an exempt
+    # word anywhere inside it would exempt the credential.) A fixture value
+    # that *starts* with ``placeholder`` is exempt through the value prefix.
+    # ``your_api_key`` is a phrase prefix (``"your_api_key_here"``) and is
+    # anchored at its start only; ``xxxx`` is a masking run and stays loose.
+    re.compile(r"(?i)(?<![\w\-])(?:placeholder|changeme)(?![\w\-])|(?<![a-z0-9])your[-_]?api[-_]?key|xxxx"),
     # Anchored at both ends like the example domains, so ``localhost-proxy``,
     # ``app_localhost``, ``localhost.prod.internal``, ``10.0.0.0`` (which
     # contains ``0.0.0.0``) and ``127.0.0.10`` are real hosts, not markers.
