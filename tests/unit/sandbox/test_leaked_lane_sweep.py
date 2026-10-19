@@ -33,6 +33,7 @@ from bernstein.core.security.audit import (
     AuditLog,
     load_or_create_audit_key,
 )
+from bernstein.core.tasks.models import TaskStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -129,7 +130,7 @@ def test_sweep_lists_sandbox_whose_task_is_terminal(tmp_path: Path, audit_key: b
     assert "done" in leaked.reason
 
 
-@pytest.mark.parametrize("status", ["done", "failed", "closed", "cancelled"])
+@pytest.mark.parametrize("status", ["done", "failed", "closed", "cancelled", "abandoned", "refused"])
 def test_every_terminal_status_counts(tmp_path: Path, audit_key: bytes, status: str) -> None:
     _record_task(tmp_path, "T-1", status)
     _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
@@ -223,6 +224,115 @@ def test_no_task_log_at_all_excludes_everything(tmp_path: Path, audit_key: bytes
     (candidate,) = sweep_leaked_sandboxes(tmp_path)
 
     assert not candidate.is_leaked
+
+
+def test_the_finished_set_is_every_no_exit_status_plus_done_and_failed() -> None:
+    """Pinned so a status added to the FSM is classified on purpose, not by accident."""
+    from bernstein.core.tasks.lifecycle import LANE_FINISHED_STATUSES, TERMINAL_TASK_STATUSES
+    from bernstein.core.tasks.models import TaskStatus
+
+    assert {s.value for s in LANE_FINISHED_STATUSES} == {
+        "abandoned",
+        "cancelled",
+        "closed",
+        "done",
+        "failed",
+        "refused",
+    }
+    assert TERMINAL_TASK_STATUSES | {TaskStatus.DONE, TaskStatus.FAILED} == LANE_FINISHED_STATUSES
+
+
+@pytest.mark.parametrize("status", sorted(s.value for s in TaskStatus))
+def test_a_session_is_leaked_exactly_when_its_task_is_finished(tmp_path: Path, audit_key: bytes, status: str) -> None:
+    """Every status the task store can record, one at a time."""
+    from bernstein.core.tasks.lifecycle import LANE_FINISHED_STATUSES
+
+    _record_task(tmp_path, "T-1", status)
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+
+    (candidate,) = sweep_leaked_sandboxes(tmp_path)
+
+    finished = status in {s.value for s in LANE_FINISHED_STATUSES}
+    assert candidate.is_leaked is finished, candidate.reason
+
+
+def _tear_task_log(workdir: Path, *, at: int) -> Path:
+    """Cut line *at* (1-based) of the task log in half, as an interleaved append can."""
+    log = workdir / ".sdd" / "runtime" / "tasks.jsonl"
+    lines = log.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines[at - 1] = lines[at - 1][: len(lines[at - 1]) // 2] + "\n"
+    log.write_text("".join(lines), encoding="utf-8")
+    return log
+
+
+@pytest.mark.parametrize("torn_line", [2, 3], ids=["torn-last", "torn-middle"])
+def test_a_torn_task_record_fails_closed(tmp_path: Path, audit_key: bytes, torn_line: int) -> None:
+    """A torn reopen would leave the task reading `done`: the sweep must not guess.
+
+    The task store skips a line it cannot parse and replays the rest, so with
+    the reopen torn the task reads back as `done` and its live session would be
+    listed as leaked - the listing the docs tell an operator to `docker rm` on.
+    """
+    _record_task(tmp_path, "T-1", "done")
+    _record_task(tmp_path, "T-1", "open")  # the reopen
+    if torn_line == 3:
+        _record_task(tmp_path, "T-2", "done")
+    log = _tear_task_log(tmp_path, at=2)
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+
+    with pytest.raises(SandboxSweepUnavailableError, match=r"tasks\.jsonl:2: task record does not parse"):
+        sweep_leaked_sandboxes(tmp_path)
+    assert "tasks.jsonl" in str(log)
+
+
+def test_blank_task_log_lines_are_not_torn(tmp_path: Path, audit_key: bytes) -> None:
+    """Whitespace-only lines are skipped by replay, so they must not brick the sweep."""
+    _record_task(tmp_path, "T-1", "done")
+    log = tmp_path / ".sdd" / "runtime" / "tasks.jsonl"
+    log.write_text(log.read_text(encoding="utf-8") + "\n   \n", encoding="utf-8")
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+
+    (candidate,) = sweep_leaked_sandboxes(tmp_path)
+
+    assert candidate.is_leaked
+
+
+def test_a_task_record_that_is_not_an_object_fails_closed(tmp_path: Path, audit_key: bytes) -> None:
+    _record_task(tmp_path, "T-1", "done")
+    log = tmp_path / ".sdd" / "runtime" / "tasks.jsonl"
+    log.write_text(log.read_text(encoding="utf-8") + '["T-1", "open"]\n', encoding="utf-8")
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+
+    with pytest.raises(SandboxSweepUnavailableError, match="tasks.jsonl:2: task record is not a JSON object"):
+        sweep_leaked_sandboxes(tmp_path)
+
+
+def test_an_unreadable_archived_audit_segment_fails_closed(tmp_path: Path, audit_key: bytes) -> None:
+    """A lost segment may hold the destroy, which would make a destroyed session look leaked."""
+    _record_task(tmp_path, "T-1", "done")
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+    archive = tmp_path / ".sdd" / "audit" / "archive"
+    archive.mkdir(parents=True)
+    (archive / "2026-01-01.jsonl.gz").write_bytes(b"\x1f\x8b not a gzip stream")
+
+    with pytest.raises(SandboxSweepUnavailableError, match=r"2026-01-01\.jsonl\.gz"):
+        sweep_leaked_sandboxes(tmp_path)
+
+
+def test_query_reports_the_segments_it_could_not_read(tmp_path: Path, audit_key: bytes) -> None:
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-1"])
+    archive = tmp_path / ".sdd" / "audit" / "archive"
+    archive.mkdir(parents=True)
+    (archive / "2026-01-01.jsonl.gz").write_bytes(b"\x1f\x8b not a gzip stream")
+    unreadable: list[str] = []
+
+    events = _audit(tmp_path, audit_key).query(include_archived=True, unreadable=unreadable)
+
+    assert [e.resource_id for e in events] == ["sbx-1"]
+    assert len(unreadable) == 1
+    assert unreadable[0].startswith("2026-01-01.jsonl.gz: unreadable archived segment")
+    # Without the list, the same query behaves exactly as before.
+    assert [e.resource_id for e in _audit(tmp_path, audit_key).query(include_archived=True)] == ["sbx-1"]
 
 
 def test_unreadable_task_log_fails_closed(tmp_path: Path, audit_key: bytes) -> None:

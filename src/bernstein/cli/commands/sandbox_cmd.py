@@ -674,8 +674,10 @@ def leaks_cmd(workdir: Path, show_all: bool, as_json: bool) -> None:
     Pairs the ``sandbox.session_create`` / ``sandbox.session_destroy`` records
     in the audit log, then reads each open session's owning task from the task
     log. A session is listed as leaked only when every task it was provisioned
-    for is recorded done, failed, closed, or cancelled; a session whose task is
-    still running, or has no record, is never listed as leaked.
+    for is recorded done, failed, closed, cancelled, abandoned, or refused; a
+    session whose task is still running, or has no record, is never listed as
+    leaked. A task log with a torn line, or an unreadable audit segment, stops
+    the command with an error rather than listing from a partial record.
 
     Read-only: nothing is destroyed or written. Remove a leaked session with
     the backend's own tooling (for example ``docker rm``) once you have checked

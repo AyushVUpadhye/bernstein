@@ -13,15 +13,20 @@ session: a session whose task is still running is supposed to exist. This
 module answers it from the task store's own replay of ``tasks.jsonl`` - the
 same last-record-wins projection the task server rebuilds on startup -
 rather than from a process-liveness or file-age heuristic. A session is
-listed as leaked only when every task it was provisioned for is recorded in
-a terminal status. Anything less certain is reported as excluded, with the
-reason:
+listed as leaked only when every task it was provisioned for is recorded
+finished: one of :data:`~bernstein.core.tasks.lifecycle.LANE_FINISHED_STATUSES`
+(``done``, ``failed``, ``closed``, ``cancelled``, ``abandoned``, ``refused``).
+Anything less certain is reported as excluded, with the reason:
 
 * the create record names no owning task (written before the spawner
   recorded one, or malformed);
 * an owning task has no record in the task store;
-* an owning task is in any non-terminal status, including ``orphaned``
-  (pending crash recovery) and ``suspended`` (resumable).
+* an owning task is in any other status, including ``orphaned`` (pending
+  crash recovery) and ``suspended`` (resumable).
+
+It fails closed rather than list from a partial source: a task log line the
+store would skip (a torn append), or an audit segment it cannot read, stops the
+sweep with the file named.
 
 The sweep is read-only. It never destroys a session, never appends to the
 audit chain, never mints an audit key, and never creates a directory.
@@ -42,7 +47,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from bernstein.core.orchestration.run_stall import TERMINAL_STATUSES
+from bernstein.core.tasks.lifecycle import LANE_FINISHED_STATUSES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -51,6 +56,11 @@ if TYPE_CHECKING:
     from bernstein.core.security.audit import AuditEvent
 
 logger = logging.getLogger(__name__)
+
+#: Status values that make a task finished for this sweep:
+#: :data:`~bernstein.core.tasks.lifecycle.LANE_FINISHED_STATUSES`, the set the
+#: lane sweeps share, so they never disagree about the same task.
+_FINISHED: frozenset[str] = frozenset(status.value for status in LANE_FINISHED_STATUSES)
 
 __all__ = [
     "OpenSandboxSession",
@@ -227,7 +237,7 @@ def classify_open_session(
     if unknown:
         reason = f"no task-store record for {', '.join(unknown)}"
         verdict = SandboxLeakVerdict.EXCLUDED
-    elif running := [f"{tid} is {st}" for tid, st in statuses.items() if st not in TERMINAL_STATUSES]:
+    elif running := [f"{tid} is {st}" for tid, st in statuses.items() if st not in _FINISHED]:
         reason = "; ".join(running)
         verdict = SandboxLeakVerdict.EXCLUDED
     else:
@@ -256,11 +266,51 @@ def _read_sandbox_events(audit_dir: Path) -> list[AuditEvent]:
         key = load_audit_key()
     except (AuditKeyMissingError, AuditKeyPermissionError) as exc:
         raise SandboxSweepUnavailableError(f"cannot open the audit log: {exc}") from exc
+    unreadable: list[str] = []
     try:
-        events = AuditLog(audit_dir, key=key).query(include_archived=True)
+        events = AuditLog(audit_dir, key=key).query(include_archived=True, unreadable=unreadable)
     except OSError as exc:
         raise SandboxSweepUnavailableError(f"cannot read the audit log at {audit_dir}: {exc}") from exc
+    if unreadable:
+        # A segment lost here may hold the create (hiding a leak) or the destroy
+        # (inventing one); either way the pairing below cannot be trusted.
+        lost = "; ".join(unreadable)
+        raise SandboxSweepUnavailableError(f"cannot read every audit segment under {audit_dir}: {lost}")
     return [e for e in events if e.event_type in (SANDBOX_SESSION_CREATE, SANDBOX_SESSION_DESTROY)]
+
+
+def _check_task_log_is_whole(jsonl_path: Path) -> None:
+    """Refuse a task log the store would replay with a record silently dropped.
+
+    ``TaskStore.replay_jsonl`` logs and skips a line that does not parse - a
+    torn append is a documented artifact of interleaved writes - and replays the
+    rest. The task then reads back at an *older* status, and older usually means
+    more finished: a torn ``done -> open`` reopen leaves the task ``done`` and its
+    live session listed as leaked. The sweep reads what replay reads, the live
+    log, with the same line rules (whitespace-only lines are skipped), and fails
+    closed on the first line it cannot use, naming it.
+    """
+    import json
+
+    if not jsonl_path.exists():
+        return
+    try:
+        lines = jsonl_path.read_text().splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SandboxSweepUnavailableError(f"cannot read the task log {jsonl_path}: {exc}") from exc
+    for line_num, raw_line in enumerate(lines, 1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            raise SandboxSweepUnavailableError(
+                f"{jsonl_path}:{line_num}: task record does not parse (a torn append?); "
+                "the task store would skip it and replay an older status, so nothing is listed"
+            ) from None
+        if not isinstance(record, dict):
+            raise SandboxSweepUnavailableError(f"{jsonl_path}:{line_num}: task record is not a JSON object")
 
 
 def _load_task_statuses(sdd_dir: Path) -> Callable[[str], str | None]:
@@ -271,13 +321,15 @@ def _load_task_statuses(sdd_dir: Path) -> Callable[[str], str | None]:
     from bernstein.core.tasks.models import TaskStoreUnavailable
     from bernstein.core.tasks.task_store import TaskStore
 
+    jsonl_path = sdd_dir / "runtime" / "tasks.jsonl"
+    _check_task_log_is_whole(jsonl_path)
     store = TaskStore(
-        jsonl_path=sdd_dir / "runtime" / "tasks.jsonl",
+        jsonl_path=jsonl_path,
         archive_path=sdd_dir / "archive" / "tasks.jsonl",
     )
     try:
         store.replay_jsonl()
-    except (TaskStoreUnavailable, ValueError, KeyError, TypeError) as exc:
+    except (TaskStoreUnavailable, ValueError, KeyError, TypeError, AttributeError) as exc:
         raise SandboxSweepUnavailableError(f"cannot replay the task log under {sdd_dir}: {exc}") from exc
 
     def _status(task_id: str) -> str | None:
