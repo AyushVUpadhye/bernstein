@@ -274,6 +274,33 @@ def test_a_tile_beside_a_damaged_segment_is_not_blamed(project: Path) -> None:
     assert "HMAC Chain" in failing
     assert "Hash Tiles" not in failing
     assert f"tiles/{tile.name}:" not in result.output
+    # Skipped on purpose, and said so: never counted as checked.
+    assert "Hash Tiles Not Judged" in result.output
+    assert "Hash Tile Verification Passed" not in result.output
+    assert "checked against authenticated segment bytes" not in result.output
+    assert "1 tile(s) beside a segment that failed verification were not judged" in result.output
+
+
+def test_verify_counts_only_the_tiles_it_judged(project: Path) -> None:
+    _sealed_tile(project)
+
+    result = _run("verify")
+
+    assert result.exit_code == 0, result.output
+    assert "1 tile(s) checked against authenticated segment bytes." in result.output
+    assert "not judged" not in result.output
+
+
+def test_a_tile_naming_no_segment_is_reported_as_not_judged(project: Path) -> None:
+    """A tile left behind for a segment that is gone is not counted as checked."""
+    tile = _sealed_tile(project)
+    tile.rename(tile.with_name("2001-01-01.jsonl.tile"))
+
+    result = _run("verify")
+
+    assert "Hash Tiles Not Judged" in result.output
+    assert "1 tile(s) name no segment in the audit log and were not judged." in result.output
+    assert "checked against authenticated segment bytes" not in result.output
 
 
 def test_a_layout_without_tiles_still_verifies(project: Path) -> None:

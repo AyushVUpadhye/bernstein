@@ -1452,6 +1452,7 @@ def _run_incremental_verify(log: AuditLog, *, record_tile_reads: bool = True) ->
 
     conflicts: list[CheckpointConflict] = []
     tile_faults: list[str] = []
+    tiles_judged = 0
     tiles_read = 0
     tiles_trusted = 0
     segments_re_read = 0
@@ -1519,6 +1520,7 @@ def _run_incremental_verify(log: AuditLog, *, record_tile_reads: bool = True) ->
             # A segment that failed is already named; only a tile that
             # misdescribes bytes this run authenticated is the tile's fault.
             if not segment_failed:
+                tiles_judged += 1
                 fault = _tile_fault(segment_name, raw, published)
                 if fault is not None:
                     errors.append(fault)
@@ -1555,6 +1557,7 @@ def _run_incremental_verify(log: AuditLog, *, record_tile_reads: bool = True) ->
         run_was_full=tiles_trusted == 0,
         records_walked=records_walked,
         tile_faults=tile_faults,
+        tiles_judged=tiles_judged,
     )
     if record_tile_reads and not hard_errors:
         _store_tile_read_count(audit_dir, tiles_read)
@@ -1647,6 +1650,9 @@ class IncrementalVerifyReport:
             hash tile, each naming ``tiles/<segment>.tile``. Chain damage and
             checkpoint conflicts are reported in *errors* only, so a caller
             that already verifies those elsewhere can report just these.
+        tiles_judged: Tiles actually checked against their segment. A tile
+            beside a segment that failed is read (counted in *tiles_read*)
+            but not judged, since the segment is already the finding.
     """
 
     ok: bool
@@ -1657,6 +1663,7 @@ class IncrementalVerifyReport:
     run_was_full: bool
     records_walked: int = 0
     tile_faults: list[str] = field(default_factory=list[str])
+    tiles_judged: int = 0
 
 
 class OutstandingTearError(RuntimeError):

@@ -428,7 +428,10 @@ pillar: a damaged, truncated or unreadable tile fails verify naming
 a tile beside a segment that fails is not judged (the segment is the
 finding, reported by the HMAC Chain or Checkpoints pillar), and a layout
 with no tiles passes, since the orchestrator's shutdown seal publishes none
-and nothing trusts a tile.
+and nothing trusts a tile. the pillar counts only the tiles it judged: one
+skipped beside a failing segment, or one naming no segment in the log, is
+reported as not judged rather than as checked, and when none was judged the
+panel says `Hash Tiles Not Judged` instead of passing.
 
 the run takes no lock and needs no write access: it works against a
 read-only copy while a writer appends to the live directory. it reads the
@@ -438,9 +441,11 @@ write, the tile-read counter behind `last_tile_read_count()`, is
 best-effort and never part of the verdict, and `audit verify` skips it.
 
 not yet covered: the HMAC Chain pillar of `bernstein audit verify` still
-walks every segment, the unchanged prefixes are still read once to be
-hashed, and a seal over a segment that grew since the last seal replaces
-that segment's tile.
+walks every segment, and the Hash Tiles pillar reads the segments again for
+its own incremental pass (cheap where the checkpoint pins them, a second full
+walk where it does not), so `audit verify` reads the log twice. the
+unchanged prefixes are still read once per pass to be hashed, and a seal over
+a segment that grew since the last seal replaces that segment's tile.
 
 ### Tears: crash damage at the chain tail
 

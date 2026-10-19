@@ -1301,7 +1301,8 @@ def _verify_hash_tiles() -> bool:
     from bernstein.core.security.audit import AuditKeyMissingError, AuditLog, load_audit_key
 
     console.print()
-    if not any((AUDIT_DIR / TILES_SUBDIR).glob("*.tile")):
+    published = sum(1 for _ in (AUDIT_DIR / TILES_SUBDIR).glob("*.tile"))
+    if not published:
         console.print("[dim]No hash tiles published. Run 'bernstein audit seal' to publish them.[/dim]")
         return True
     try:
@@ -1322,8 +1323,24 @@ def _verify_hash_tiles() -> bool:
         for fault in report.tile_faults:
             console.print(f"  [red]![/red] {fault}")
         return False
-    console.print(Panel("[bold green]Hash Tile Verification Passed[/bold green]", border_style="green", expand=False))
-    console.print(f"  [dim]{report.tiles_read} tile(s) checked against authenticated segment bytes.[/dim]")
+    # Say exactly what was checked: a tile beside a failing segment, or one that
+    # names no segment in the walk, was not judged and is not counted as checked.
+    beside_failing = report.tiles_read - report.tiles_judged
+    unmatched = published - report.tiles_read
+    if report.tiles_judged:
+        console.print(
+            Panel("[bold green]Hash Tile Verification Passed[/bold green]", border_style="green", expand=False)
+        )
+        console.print(f"  [dim]{report.tiles_judged} tile(s) checked against authenticated segment bytes.[/dim]")
+    else:
+        console.print(Panel("[bold yellow]Hash Tiles Not Judged[/bold yellow]", border_style="yellow", expand=False))
+    if beside_failing:
+        console.print(
+            f"  [dim]{beside_failing} tile(s) beside a segment that failed verification were not judged "
+            "(the segment is the finding).[/dim]"
+        )
+    if unmatched:
+        console.print(f"  [dim]{unmatched} tile(s) name no segment in the audit log and were not judged.[/dim]")
     return True
 
 

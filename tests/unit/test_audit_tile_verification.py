@@ -31,7 +31,6 @@ from bernstein.core.persistence.chain_checkpoint import latest_pointer_path, rec
 from bernstein.core.persistence.merkle import compute_seal
 from bernstein.core.persistence.tiles import (
     generate_tiles,
-    has_hash_tile,
     render_hash_tile,
     tile_hash_path,
 )
@@ -260,8 +259,8 @@ def test_missing_hash_tile_forces_archived_segment_re_open(tmp_path: Path) -> No
     names = sorted(contents)
     one = {names[0]: contents[names[0]]}
     _seal_segments(audit_dir, one, key)
-    assert has_hash_tile(audit_dir, names[0])
-    assert not has_hash_tile(audit_dir, names[1])
+    assert tile_hash_path(audit_dir, names[0]).is_file()
+    assert not tile_hash_path(audit_dir, names[1]).is_file()
 
     # Archive everything (retention-shaped scenario) so both segments live
     # in .gz form.
@@ -1063,9 +1062,12 @@ def test_a_seal_between_reading_a_segment_and_its_tile_is_not_a_tile_fault(
 ) -> None:
     """Segments only grow, so the verifier reads each tile before its segment.
 
-    The writer appends to the newest segment and re-seals at the worst moment:
-    after the verifier has read that segment, before it looks at the tile. The
-    re-seal publishes a tile describing more bytes than the verifier holds.
+    The writer appends to the newest segment and re-seals while the run is in
+    progress, between the tile snapshot and the run's read of that segment. The
+    re-seal publishes a tile describing more bytes; the run must judge the tile
+    it snapshotted against the segment it read after, which holds at least those
+    bytes. Read the old way round (segment first, tile at check time), the
+    re-sealed tile describes bytes the run never saw and is reported as a fault.
     """
     import bernstein.core.security.audit as audit_mod
 
@@ -1122,3 +1124,14 @@ def test_tile_faults_are_reported_apart_from_chain_errors(tmp_path: Path) -> Non
     assert report.tile_faults == [f"tiles/{first.name}.tile: hash tile names unsupported seal scheme 3"]
     assert report.tile_faults[0] in report.errors
     assert any(error.startswith(f"{second.name}:") for error in report.errors)
+
+
+def test_an_unreadable_tile_is_a_fault_naming_the_tile() -> None:
+    """A tile the snapshot could not read is a finding, never a pass."""
+    from bernstein.core.security.audit import _tile_fault  # pyright: ignore[reportPrivateUsage]
+
+    fault = _tile_fault("2026-08-10.jsonl", b"", PermissionError(13, "Permission denied"))
+
+    assert fault is not None
+    assert fault.startswith("tiles/2026-08-10.jsonl.tile: hash tile is unreadable - ")
+    assert "Permission denied" in fault
