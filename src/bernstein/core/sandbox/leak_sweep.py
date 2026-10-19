@@ -289,6 +289,11 @@ def _check_task_log_is_whole(jsonl_path: Path) -> None:
     live session listed as leaked. The sweep reads what replay reads, the live
     log, with the same line rules (whitespace-only lines are skipped), and fails
     closed on the first line it cannot use, naming it.
+
+    The archive (``archive/tasks.jsonl``) is not scanned because replay does not
+    read it. If replay's file set ever widens, this scan must widen with it;
+    ``test_the_task_archive_feeds_neither_replay_nor_the_torn_line_scan`` fails
+    when that happens.
     """
     import json
 

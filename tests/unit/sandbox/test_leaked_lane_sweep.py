@@ -285,6 +285,28 @@ def test_a_torn_task_record_fails_closed(tmp_path: Path, audit_key: bytes, torn_
     assert "tasks.jsonl" in str(log)
 
 
+def test_the_task_archive_feeds_neither_replay_nor_the_torn_line_scan(tmp_path: Path, audit_key: bytes) -> None:
+    """The torn-line scan covers exactly the file replay reads: the live log.
+
+    ``replay_jsonl`` never opens ``archive/tasks.jsonl``, so a torn archive line
+    cannot revert a status and the scan rightly ignores it. This pins that
+    coupling: if replay ever starts reading the archive, the archived record
+    below would be found (and the torn line would matter), this test fails, and
+    ``_check_task_log_is_whole`` has to widen with it.
+    """
+    archive = tmp_path / ".sdd" / "archive" / "tasks.jsonl"
+    archive.parent.mkdir(parents=True)
+    archived = {"id": "T-arch", "title": "t", "description": "", "role": "backend", "status": "done"}
+    archive.write_text(json.dumps(archived) + "\n" + json.dumps(archived)[:20] + "\n", encoding="utf-8")
+    _record_task(tmp_path, "T-live", "done")
+    _record_create(tmp_path, audit_key, "sbx-1", task_ids=["T-arch"])
+
+    (candidate,) = sweep_leaked_sandboxes(tmp_path)
+
+    assert not candidate.is_leaked
+    assert candidate.task_statuses == {"T-arch": None}
+
+
 def test_blank_task_log_lines_are_not_torn(tmp_path: Path, audit_key: bytes) -> None:
     """Whitespace-only lines are skipped by replay, so they must not brick the sweep."""
     _record_task(tmp_path, "T-1", "done")
