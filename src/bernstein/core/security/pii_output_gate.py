@@ -194,7 +194,7 @@ _SECRET_RULES: list[tuple[str, re.Pattern[str], str, str]] = [
 
 # Known benign values (example domains, test addresses, placeholders, local
 # hosts). A match is exempt only when it overlaps one of these, i.e. when the
-# benign marker is part of the flagged value: see :func:`_benign_spans`.
+# benign marker is part of the flagged value: see :func:`_benign_mask`.
 _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
     # Anchored at both ends, so a real host that merely contains a marker
     # (``counterexample.com``, ``db.myexample.org``, ``example.com.au``) is not
@@ -205,8 +205,16 @@ _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
     # after one: neither a ``latest@`` password nor a password that *is* a
     # marker (``svc:admin@``) is read as a benign address.
     re.compile(r"(?i)(?<![\w.%+\-:])(?:test|user|admin|noreply|no-reply)@"),
-    re.compile(r"(?i)placeholder|changeme|your[-_]?api[-_]?key|xxxx"),
-    re.compile(r"(?i)localhost|127\.0\.0\.1|0\.0\.0\.0"),
+    # Whole words, so a word that merely contains one (a ``/placeholders``
+    # database) is not exempt; ``-`` and ``_`` still separate words, so
+    # ``"xxx-placeholder-token-xxx"`` is. ``your_api_key`` is a phrase prefix
+    # (``"your_api_key_here"``) and is anchored at its start only; ``xxxx`` is
+    # a masking run and stays loose.
+    re.compile(r"(?i)(?<![a-z0-9])(?:placeholder|changeme)(?![a-z0-9])|(?<![a-z0-9])your[-_]?api[-_]?key|xxxx"),
+    # Anchored at both ends like the example domains, so ``localhost-proxy``,
+    # ``app_localhost``, ``localhost.prod.internal``, ``10.0.0.0`` (which
+    # contains ``0.0.0.0``) and ``127.0.0.10`` are real hosts, not markers.
+    re.compile(r"(?i)(?<![\w\-])(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?![\w\-]|\.[\w\-])"),
     # Only the assignment itself, so the span cannot stretch over a real secret
     # sitting between ``password`` and some later test-looking value.
     re.compile(r"(?i)password\s*=\s*['\"](?:test|password|changeme|secret|admin)['\"]"),
@@ -264,24 +272,32 @@ def _looks_like_credit_card(match_text: str) -> bool:
     return luhn_check(digits)
 
 
-def _benign_spans(line: str, allowlist_prefixes: list[str] | None) -> list[tuple[int, int]]:
-    """Return the spans of *line* that the allowlist marks as benign values.
+def _benign_mask(line: str, allowlist_prefixes: list[str] | None) -> bytearray:
+    """Return a per-character mask of *line*: ``1`` where the allowlist marks a benign value.
 
-    A match is suppressed only when it overlaps one of these spans -- when the
+    A match is suppressed only when it overlaps a marked character -- when the
     benign marker is part of the flagged value (``"postgres://...@localhost"``,
     ``user@example.com``, ``"TEST_..."``). Applied to the whole line, a
     ``user@`` address, a ``# placeholder`` comment or a ``localhost`` note
     anywhere on it would hide a real token, SSN or card number beside it.
+
+    Built once per line, so checking a match costs its own length rather than
+    one comparison per benign span: a minified bundle or a source map is one
+    long line dense with both, and the gate runs with no timeout.
     """
-    spans = [match.span() for pattern in _ALLOWLIST_PATTERNS for match in pattern.finditer(line)]
-    spans.extend(match.span() for match in _allowlist_prefix_pattern(allowlist_prefixes).finditer(line))
-    return spans
+    mask = bytearray(len(line))
+    matches = [match for pattern in _ALLOWLIST_PATTERNS for match in pattern.finditer(line)]
+    matches.extend(_allowlist_prefix_pattern(allowlist_prefixes).finditer(line))
+    for match in matches:
+        start, end = match.span()
+        mask[start:end] = b"\x01" * (end - start)
+    return mask
 
 
-def _overlaps(span: tuple[int, int], others: list[tuple[int, int]]) -> bool:
-    """True when *span* shares at least one character with any of *others*."""
+def _overlaps(span: tuple[int, int], mask: bytearray) -> bool:
+    """True when *span* covers at least one character *mask* marks benign."""
     start, end = span
-    return any(start < other_end and other_start < end for other_start, other_end in others)
+    return mask.find(1, start, end) != -1
 
 
 def _passes_rule_filters(
@@ -301,21 +317,6 @@ def _passes_rule_filters(
         if not _has_mixed_case_and_digits(value):
             return False
     return True
-
-
-def _check_rule_match(
-    rule_label: str,
-    pattern: re.Pattern[str],
-    line: str,
-) -> re.Match[str] | None:
-    """Check a single rule against a line, applying rule-specific filters.
-
-    Returns the first match that passes rule-specific filters, or None.
-    """
-    for m in pattern.finditer(line):
-        if _passes_rule_filters(rule_label, m):
-            return m
-    return None
 
 
 def _build_redacted_excerpt(line: str, m: re.Match[str]) -> str:
@@ -347,10 +348,10 @@ def _scan_line(
     scanner-evasion bug where a single rule's dedup would silently drop the
     second/third secret of the same type.
 
-    A match whose span overlaps a benign value (see :func:`_benign_spans`) is
+    A match whose span overlaps a benign value (see :func:`_benign_mask`) is
     skipped; every other match on the line is still reported.
     """
-    benign = _benign_spans(line, allowlist_prefixes)
+    benign = _benign_mask(line, allowlist_prefixes)
     for rule_label, pattern, severity, description in _SECRET_RULES:
         for m in pattern.finditer(line):
             if _overlaps(m.span(), benign) or not _passes_rule_filters(rule_label, m):

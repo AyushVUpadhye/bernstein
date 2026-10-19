@@ -205,6 +205,7 @@ class TestAllowlist:
 # read the test file as a leak.
 _GITHUB_TOKEN = "gh" + "p_" + "Ab3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5"
 _STRIPE_KEY = "sk_" + "live_" + "a1B2c3D4e5F6g7H8i9J0"
+_URL_CREDS = "postgres" + "://svc:S3cretPass@"
 _DB_URL = "postgres" + "://admin:S3cretPass@db.prod.internal:5432/app"
 
 #: Every built-in benign marker, written the way it turns up beside real data.
@@ -344,6 +345,38 @@ class TestAllowlistIsScopedToTheFlaggedValue:
             ),
             # ``.com.au`` is a registrable domain of its own, not example.com.
             ("owner jane@example.com.au", "owner jane@example.com", "email_address"),
+            # The local-host and placeholder markers are anchored the same way: a
+            # real host, database or path that only contains one is not exempt.
+            (
+                f'DATABASE_URL = "{_URL_CREDS}localhost-proxy.prod.internal:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}localhost:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}localhost.prod.internal:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}localhost:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/app_localhost"',
+                f'DATABASE_URL = "{_URL_CREDS}localhost:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}10.0.0.0:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}0.0.0.0:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}127.0.0.10:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}127.0.0.1:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholders"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholder"',
+                "connection_string",
+            ),
         ],
     )
     def test_a_value_that_only_contains_a_marker_is_not_exempt(
@@ -359,10 +392,40 @@ class TestAllowlistIsScopedToTheFlaggedValue:
             "see example.com.",
             "see https://api.example.com/x",
             "write to user@example.com.",
+            'bind = "0.0.0.0:8080"  # all interfaces',
+            'API = "http://127.0.0.1:8052/tasks"',
+            "falls back to localhost.",
+            "replace placeholder later",
+            'api_key = "your_api_key_here"',
+            "token = xxxxxxxxxxxxxxxxxxxx",
+            'auth_token = "xxx-placeholder-token-xxx"',
         ],
     )
     def test_anchoring_keeps_benign_uses_exempt(self, line: str) -> None:
         assert _rules(line) == []
+
+    def test_scan_cost_grows_linearly_with_a_marker_dense_line(self) -> None:
+        """One long line dense with markers and matches - a minified bundle or a source map.
+
+        Checking each match against a per-line mask keeps the scan linear;
+        checking it against every benign span made it quadratic, and the gate
+        runs with no timeout. Compared as a ratio, so machine speed cancels out:
+        4x the matches must cost well under the ~16x a quadratic scan pays.
+        """
+        import time
+
+        def best_of_three(count: int) -> float:
+            line = ",".join(['xxxx"4111111111111111"'] * count)
+            timings = []
+            for _ in range(3):
+                started = time.perf_counter()
+                assert len(scan_text(line)) == count
+                timings.append(time.perf_counter() - started)
+            return min(timings)
+
+        small, large = best_of_three(2000), best_of_three(8000)
+
+        assert large < 8 * small + 0.05, (small, large)
 
     def test_a_test_password_does_not_stretch_over_a_real_token(self) -> None:
         line = f'connect(password=pw, token="{_GITHUB_TOKEN}", user="admin")'
