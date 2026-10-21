@@ -402,6 +402,28 @@ class TestAllowlistIsScopedToTheFlaggedValue:
                 'auth_token = "placeholder-token"',
                 "generic_api_key",
             ),
+            # A marker used as a DNS label is a host name, not a marker; the
+            # host marker already reads ``localhost.prod.internal`` that way.
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.changeme.prod.internal:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/changeme"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}placeholder.prod.internal:5432/app"',
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/placeholder"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.your-api-key.prod.internal:5432/app"',
+                'DATABASE_URL = "postgres://svc:your-api-key@db.prod.internal:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}your-api-key.prod.internal:5432/app"',
+                'DATABASE_URL = "postgres://svc:your-api-key@db.prod.internal:5432/app"',
+                "connection_string",
+            ),
         ],
     )
     def test_a_value_that_only_contains_a_marker_is_not_exempt(
@@ -426,6 +448,8 @@ class TestAllowlistIsScopedToTheFlaggedValue:
             'auth_token = "placeholder-token"',
             'token = "placeholder"',
             "SECRET = <changeme>",
+            "replace the placeholder.",
+            "set it to your-api-key.",
         ],
     )
     def test_anchoring_keeps_benign_uses_exempt(self, line: str) -> None:

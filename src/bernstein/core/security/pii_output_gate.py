@@ -205,15 +205,22 @@ _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
     # after one: neither a ``latest@`` password nor a password that *is* a
     # marker (``svc:admin@``) is read as a benign address.
     re.compile(r"(?i)(?<![\w.%+\-:])(?:test|user|admin|noreply|no-reply)@"),
-    # Whole names, bounded like the hosts below: ``-`` and ``_`` join words, so
-    # a ``/placeholders`` database, a ``placeholder-proxy`` host or an
-    # ``app-changeme-2`` database is a real name that contains a marker, not a
-    # marker. (A connection-string match covers the whole URL, so an exempt
-    # word anywhere inside it would exempt the credential.) A fixture value
-    # that *starts* with ``placeholder`` is exempt through the value prefix.
-    # ``your_api_key`` is a phrase prefix (``"your_api_key_here"``) and is
-    # anchored at its start only; ``xxxx`` is a masking run and stays loose.
-    re.compile(r"(?i)(?<![\w\-])(?:placeholder|changeme)(?![\w\-])|(?<![a-z0-9])your[-_]?api[-_]?key|xxxx"),
+    # Whole names, bounded exactly like the hosts below: ``-`` and ``_`` join
+    # words and a ``.`` before another label continues a host name, so a
+    # ``/placeholders`` database, a ``placeholder-proxy`` host, an
+    # ``app-changeme-2`` database or a ``db.changeme.prod.internal`` host is a
+    # real name that contains a marker, not a marker. (A connection-string
+    # match covers the whole URL, so an exempt word anywhere inside it would
+    # exempt the credential.) A fixture value that *starts* with
+    # ``placeholder`` is exempt through the value prefix. ``your_api_key`` is
+    # a phrase prefix (``"your_api_key_here"``): it may run on into ``_here``,
+    # but not sit inside or before a DNS label. ``xxxx`` is a masking run and
+    # stays loose.
+    re.compile(
+        r"(?i)(?<![\w\-])(?:placeholder|changeme)(?![\w\-]|\.[\w\-])"
+        r"|(?<![a-z0-9.])your[-_]?api[-_]?key(?!\.[\w\-])"
+        r"|xxxx"
+    ),
     # Anchored at both ends like the example domains, so ``localhost-proxy``,
     # ``app_localhost``, ``localhost.prod.internal``, ``10.0.0.0`` (which
     # contains ``0.0.0.0``) and ``127.0.0.10`` are real hosts, not markers.

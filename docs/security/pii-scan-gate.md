@@ -71,9 +71,12 @@ Two post-filters reduce false positives before a match is reported:
   exactly `test`/`user`/`admin`/`noreply`/`no-reply` (not `sysadmin@`,
   `contact.test@`, or a URL password such as `svc:admin@`), the whole
   names `placeholder`/`changeme` (not `/placeholders`, a
-  `placeholder-proxy` host or an `app-changeme-2` database: `-` and `_`
-  join words, as in the hosts below), values starting
-  `your-api-key`/`your_api_key`, masking runs of `xxxx`, the hosts
+  `placeholder-proxy` host, an `app-changeme-2` database or a
+  `db.changeme.prod.internal` host: they are bounded like the hosts below,
+  so `-` and `_` join words and a following `.label` continues a host
+  name), values starting `your-api-key`/`your_api_key` (not when the phrase
+  is a DNS label, as in `db.your-api-key.prod.internal`), masking runs of
+  `xxxx`, the hosts
   `localhost`/`127.0.0.1`/`0.0.0.0` (not `localhost-proxy`,
   `localhost.prod.internal`, `app_localhost`, `10.0.0.0` or `127.0.0.10`),
   and password assignments using known test values
