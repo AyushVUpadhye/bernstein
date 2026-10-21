@@ -424,6 +424,18 @@ class TestAllowlistIsScopedToTheFlaggedValue:
                 'DATABASE_URL = "postgres://svc:your-api-key@db.prod.internal:5432/app"',
                 "connection_string",
             ),
+            # A marker embedded in a database or path token is a real token,
+            # not an exempt fixture value.
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/app_your_api_key"',
+                'DATABASE_URL = "postgres://svc:your-api-key@db.prod.internal:5432/app"',
+                "connection_string",
+            ),
+            (
+                f'DATABASE_URL = "{_URL_CREDS}db.prod.internal:5432/app-your-api-key"',
+                'DATABASE_URL = "postgres://svc:your-api-key@db.prod.internal:5432/app"',
+                "connection_string",
+            ),
         ],
     )
     def test_a_value_that_only_contains_a_marker_is_not_exempt(

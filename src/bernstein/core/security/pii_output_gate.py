@@ -214,11 +214,12 @@ _ALLOWLIST_PATTERNS: list[re.Pattern[str]] = [
     # exempt the credential.) A fixture value that *starts* with
     # ``placeholder`` is exempt through the value prefix. ``your_api_key`` is
     # a phrase prefix (``"your_api_key_here"``): it may run on into ``_here``,
-    # but not sit inside or before a DNS label. ``xxxx`` is a masking run and
+    # but not sit inside a host, database token or DNS label (bounded on
+    # ``[\w\-.]`` on the left). ``xxxx`` is a masking run and
     # stays loose.
     re.compile(
         r"(?i)(?<![\w\-])(?:placeholder|changeme)(?![\w\-]|\.[\w\-])"
-        r"|(?<![a-z0-9.])your[-_]?api[-_]?key(?!\.[\w\-])"
+        r"|(?<![\w\-.])your[-_]?api[-_]?key(?!\.[\w\-])"
         r"|xxxx"
     ),
     # Anchored at both ends like the example domains, so ``localhost-proxy``,

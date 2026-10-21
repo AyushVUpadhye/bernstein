@@ -75,7 +75,8 @@ Two post-filters reduce false positives before a match is reported:
   `db.changeme.prod.internal` host: they are bounded like the hosts below,
   so `-` and `_` join words and a following `.label` continues a host
   name), values starting `your-api-key`/`your_api_key` (not when the phrase
-  is a DNS label, as in `db.your-api-key.prod.internal`), masking runs of
+  is a DNS label or part of a host or database token, as in
+  `db.your-api-key.prod.internal` or `app_your_api_key`), masking runs of
   `xxxx`, the hosts
   `localhost`/`127.0.0.1`/`0.0.0.0` (not `localhost-proxy`,
   `localhost.prod.internal`, `app_localhost`, `10.0.0.0` or `127.0.0.10`),
