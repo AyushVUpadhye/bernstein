@@ -1323,10 +1323,11 @@ def _verify_hash_tiles() -> bool:
         for fault in report.tile_faults:
             console.print(f"  [red]![/red] {fault}")
         return False
-    # Say exactly what was checked: a tile beside a failing segment, or one that
-    # names no segment in the walk, was not judged and is not counted as checked.
+    # Say exactly what was checked from the verifier's single snapshot: a tile
+    # beside a failing segment, or one that names no segment in the walk, was
+    # not judged and is not counted as checked.
     beside_failing = report.tiles_read - report.tiles_judged
-    unmatched = published - report.tiles_read
+    unmatched = report.tiles_unmatched
     if report.tiles_judged:
         console.print(
             Panel("[bold green]Hash Tile Verification Passed[/bold green]", border_style="green", expand=False)

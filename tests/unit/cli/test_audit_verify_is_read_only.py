@@ -19,6 +19,10 @@ from click.testing import CliRunner
 
 from bernstein.cli.commands.audit_cmd import audit_group
 from bernstein.core.security.audit import AUDIT_KEY_ENV, AuditLog, load_or_create_audit_key
+from tests.unit.test_audit_tile_verification import (  # pyright: ignore[reportPrivateUsage, reportUnknownVariableType]
+    _append,
+    _seal,
+)
 
 
 @pytest.fixture
@@ -331,3 +335,76 @@ def test_a_damaged_tile_is_reported_with_writes_and_the_lock_forbidden(project: 
     assert attempts == []
     assert result.exit_code == 1
     assert f"tiles/{tile.name}:" in result.output
+
+
+def test_concurrent_seal_before_verifier_snapshot_reports_no_negative_tile_count(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Case A: a concurrent append and seal lands before the verifier's snapshot.
+
+    The initial CLI accounting must not disagree with the verifier's single snapshot,
+    producing negative tile counts or reporting tiles outside the snapshot.
+    """
+    _sealed_tile(project)
+    audit_dir = project / ".sdd" / "audit"
+    key = load_or_create_audit_key()
+
+    real_verify = AuditLog.verify_incremental
+    sealed_mid_run: list[bool] = []
+
+    def _seal_then_verify(self: AuditLog, *args: Any, **kwargs: Any) -> Any:
+        if not sealed_mid_run:
+            sealed_mid_run.append(True)
+            _append(audit_dir, key, day="2026-10-25", count=2)
+            _seal(audit_dir, key)
+        return real_verify(self, *args, **kwargs)
+
+    monkeypatch.setattr(AuditLog, "verify_incremental", _seal_then_verify)
+    result = _run("verify")
+
+    assert sealed_mid_run
+    assert result.exit_code == 0, result.output
+    assert "-1" not in result.output
+    assert "2 tile(s) checked against authenticated segment bytes." in result.output
+    assert "name no segment in the audit log" not in result.output
+    assert "Hash Tile Verification Passed" in result.output
+    assert "Audit Verification: PASSED" in result.output
+
+
+def test_concurrent_seal_with_existing_orphan_retains_orphan_report(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Case B: an existing orphan tile remains reported when a concurrent seal lands.
+
+    Clamping counts at zero hides negative values but omits the orphan. Deriving
+    all counts from the verifier's snapshot preserves both the orphan report and
+    correct checked counts.
+    """
+    tile = _sealed_tile(project)
+    audit_dir = project / ".sdd" / "audit"
+    key = load_or_create_audit_key()
+
+    # Create a stable orphan tile that names no segment in the log.
+    orphan = audit_dir / "tiles" / "2001-01-01.jsonl.tile"
+    orphan.write_bytes(tile.read_bytes())
+
+    real_verify = AuditLog.verify_incremental
+    sealed_mid_run: list[bool] = []
+
+    def _seal_then_verify(self: AuditLog, *args: Any, **kwargs: Any) -> Any:
+        if not sealed_mid_run:
+            sealed_mid_run.append(True)
+            _append(audit_dir, key, day="2026-10-25", count=2)
+            _seal(audit_dir, key)
+        return real_verify(self, *args, **kwargs)
+
+    monkeypatch.setattr(AuditLog, "verify_incremental", _seal_then_verify)
+    result = _run("verify")
+
+    assert sealed_mid_run
+    assert result.exit_code == 0, result.output
+    assert "-1" not in result.output
+    assert "2 tile(s) checked against authenticated segment bytes." in result.output
+    assert "1 tile(s) name no segment in the audit log and were not judged." in result.output
+    assert "Hash Tile Verification Passed" in result.output
+    assert "Audit Verification: PASSED" in result.output

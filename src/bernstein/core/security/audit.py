@@ -1445,6 +1445,7 @@ def _run_incremental_verify(log: AuditLog, *, record_tile_reads: bool = True) ->
             tiles_trusted=0,
             segments_re_read=0,
             run_was_full=True,
+            tiles_unmatched=len(published_tiles),
         )
         if record_tile_reads:
             _store_tile_read_count(audit_dir, 0)
@@ -1558,6 +1559,7 @@ def _run_incremental_verify(log: AuditLog, *, record_tile_reads: bool = True) ->
         records_walked=records_walked,
         tile_faults=tile_faults,
         tiles_judged=tiles_judged,
+        tiles_unmatched=len(published_tiles) - tiles_read,
     )
     if record_tile_reads and not hard_errors:
         _store_tile_read_count(audit_dir, tiles_read)
@@ -1653,6 +1655,8 @@ class IncrementalVerifyReport:
         tiles_judged: Tiles actually checked against their segment. A tile
             beside a segment that failed is read (counted in *tiles_read*)
             but not judged, since the segment is already the finding.
+        tiles_unmatched: Published hash tiles in the verifier's snapshot that
+            name no segment in the audit log and were not judged.
     """
 
     ok: bool
@@ -1664,6 +1668,7 @@ class IncrementalVerifyReport:
     records_walked: int = 0
     tile_faults: list[str] = field(default_factory=list[str])
     tiles_judged: int = 0
+    tiles_unmatched: int = 0
 
 
 class OutstandingTearError(RuntimeError):
