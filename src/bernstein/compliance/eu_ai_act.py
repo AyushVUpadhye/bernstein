@@ -614,10 +614,14 @@ class _AnnexIIIClassifier:
                     "under Article 6(1): a safety component of, or itself, a product covered by "
                     "Section A of Annex I that requires third-party conformity assessment."
                 )
+            registration_phrase = (
+                "CE marking, and EU database registration required before deployment."
+                if annex_iii_domain not in (AnnexIIIDomain.NOT_APPLICABLE, AnnexIIIDomain.CRITICAL_INFRASTRUCTURE)
+                else "and CE marking required before deployment."
+            )
             justification = (
                 f"System '{descriptor.name}' is HIGH RISK {' Also '.join(bases)} "
-                "Full conformity assessment, technical documentation (Annex IV), "
-                "CE marking, and EU database registration required before deployment."
+                f"Full conformity assessment, technical documentation (Annex IV), {registration_phrase}"
             )
         elif article50_triggers:
             risk_category = RiskCategory.LIMITED
@@ -669,6 +673,23 @@ class _AnnexIIIClassifier:
             classification_hash=classification_hash,
             annex_i_section_a_product=descriptor.annex_i_section_a_product,
         )
+
+
+def requires_article49_registration(classification: ClassificationResult) -> bool:
+    """Whether high-risk registration in the Article 71 EU database (Article 49) applies.
+
+    Under Article 49(1), registration in the EU database applies to systems
+    classified as high-risk under Annex III, except for point 2 (critical
+    infrastructure). Under Article 49(5), Annex I systems shall not be
+    registered in the Article 71 EU database; sectoral product registration
+    applies where required under the sectoral legislation.
+    """
+    if classification.risk_category != RiskCategory.HIGH:
+        return False
+    return classification.annex_iii_domain not in (
+        AnnexIIIDomain.NOT_APPLICABLE,
+        AnnexIIIDomain.CRITICAL_INFRASTRUCTURE,
+    )
 
 
 def applicable_obligations(classification: ClassificationResult) -> list[AIActObligation]:
@@ -866,19 +887,61 @@ class TechDocGenerator:
         d: SystemDescriptor,
         c: ClassificationResult,
     ) -> str:
-        procedure = (
-            "Conformity Assessment Procedure: Annex VI (Internal Control)\n"
-            "OR Third-party assessment by notified body if biometric identification system "
-            "(Annex VII/VIII as applicable)"
-            if c.risk_category == RiskCategory.HIGH
-            else "No conformity assessment required for this risk category."
-        )
+        if c.risk_category != RiskCategory.HIGH:
+            procedure = "No conformity assessment required for this risk category."
+        elif c.annex_i_section_a_product and c.annex_iii_domain == AnnexIIIDomain.NOT_APPLICABLE:
+            procedure = (
+                "Conformity Assessment Procedure: Relevant sectoral conformity assessment "
+                "procedure under applicable Union harmonisation legislation listed in Annex I, "
+                "Section A (Article 43(3)), with Chapter III, Section 2 requirements incorporated "
+                "into that assessment (third-party assessment by notified body designated under "
+                "sectoral law)"
+            )
+        elif c.annex_i_section_a_product and c.annex_iii_domain != AnnexIIIDomain.NOT_APPLICABLE:
+            procedure = (
+                "Conformity Assessment Procedure: Relevant sectoral conformity assessment "
+                "procedure under applicable Union harmonisation legislation listed in Annex I, "
+                "Section A (Article 43(3)), incorporating Chapter III, Section 2 requirements "
+                "into a single assessment (third-party assessment by notified body designated "
+                "under sectoral law);\n"
+                "Annex III basis: Annex VI (Internal Control) or Annex VII/VIII notified body "
+                "if applicable (integrated into sectoral assessment per Article 43(3))"
+            )
+        else:
+            procedure = (
+                "Conformity Assessment Procedure: Annex VI (Internal Control)\n"
+                "OR Third-party assessment by notified body if biometric identification system "
+                "(Annex VII/VIII as applicable)"
+            )
+
+        if "eu_db_registration" in d.metadata:
+            db_status = d.metadata["eu_db_registration"]
+        elif requires_article49_registration(c):
+            db_status = "PENDING - required before deployment (Article 49)"
+        elif (
+            c.risk_category == RiskCategory.HIGH
+            and c.annex_i_section_a_product
+            and c.annex_iii_domain == AnnexIIIDomain.NOT_APPLICABLE
+        ):
+            db_status = (
+                "NOT APPLICABLE - Annex I systems are exempt from EU AI Act database registration "
+                "(Article 49(5)); sectoral product registration applies where required under applicable "
+                "Union harmonisation legislation"
+            )
+        elif c.risk_category == RiskCategory.HIGH and c.annex_iii_domain == AnnexIIIDomain.CRITICAL_INFRASTRUCTURE:
+            db_status = (
+                "NOT APPLICABLE - Exempt from EU database registration under Article 49(1) "
+                "(Annex III, point 2 critical infrastructure)"
+            )
+        else:
+            db_status = "NOT APPLICABLE"
+
         return (
             f"{procedure}\n"
             f"Harmonised Standards Applied: {d.metadata.get('harmonised_standards', 'NOT SPECIFIED')}\n"
             f"Notified Body: {d.metadata.get('notified_body', 'NOT YET ASSIGNED')}\n"
             f"CE Marking: {d.metadata.get('ce_marking_status', 'PENDING')}\n"
-            f"EU Database Registration: {d.metadata.get('eu_db_registration', 'PENDING - required before deployment (Article 49)')}\n"
+            f"EU Database Registration: {db_status}\n"
             f"Declaration of Conformity: {d.metadata.get('declaration_of_conformity', 'NOT YET ISSUED')}\n"
             f"{_conformity_deadline_line(c)}"
         )
@@ -1286,8 +1349,9 @@ class ComplianceEngine:
                 steps.append(f"Address {r.failed} mandatory gap(s) listed in conformity checks.")
             if r.partial > 0:
                 steps.append(f"Complete {r.partial} partial requirement(s) in technical documentation.")
+            if requires_article49_registration(c):
+                steps.append("Register system in EU AI Act database (Article 49) before deployment.")
             steps += [
-                "Register system in EU AI Act database (Article 49) before deployment.",
                 "Obtain CE marking after successful conformity assessment.",
                 "Establish post-market monitoring system (Article 72).",
             ]

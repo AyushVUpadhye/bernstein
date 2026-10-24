@@ -52,6 +52,7 @@ from bernstein.compliance.eu_ai_act import (
     RiskCategory,
     SystemDescriptor,
     applicable_obligations,
+    requires_article49_registration,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -294,6 +295,87 @@ def test_the_cli_prints_the_category_date(monkeypatch: pytest.MonkeyPatch) -> No
     assert "2 August 2028" in result.output
     assert "Article 113, third paragraph, point (c)(ii)" in result.output
     assert "2027" not in result.output
+
+
+def test_annex_i_only_conformity_procedure_and_article_49_scoping() -> None:
+    """Annex I Section A products follow sectoral procedures and are exempt from EU AI Act database registration."""
+    engine = ComplianceEngine()
+    descriptor = _descriptor(**ANNEX_I)
+    classification = engine.classify(descriptor)
+
+    assert classification.risk_category is RiskCategory.HIGH
+    assert not requires_article49_registration(classification)
+    assert "Article 49" not in classification.justification
+    assert "EU database registration" not in classification.justification
+
+    report = engine.run(descriptor)
+    s8 = report["tech_doc"]["sections"]["8_conformity_declaration"]
+    assert "Annex I, Section A (Article 43(3))" in s8
+    assert "sectoral conformity assessment procedure" in s8
+    assert "Annex VI (Internal Control)" not in s8
+    assert (
+        "EU Database Registration: NOT APPLICABLE - Annex I systems are exempt from EU AI Act database registration (Article 49(5))"
+        in s8
+    )
+
+    steps = report["compliance_summary"]["next_steps"]
+    assert not any("Article 49" in s for s in steps)
+
+
+def test_annex_iii_critical_infrastructure_article_49_exemption() -> None:
+    """Annex III point 2 critical infrastructure systems are exempt under Article 49(1)."""
+    engine = ComplianceEngine()
+    descriptor = _descriptor(interacts_with_critical_infrastructure=True)
+    classification = engine.classify(descriptor)
+
+    assert classification.risk_category is RiskCategory.HIGH
+    assert not requires_article49_registration(classification)
+    assert "EU database registration" not in classification.justification
+
+    report = engine.run(descriptor)
+    s8 = report["tech_doc"]["sections"]["8_conformity_declaration"]
+    assert "EU Database Registration: NOT APPLICABLE - Exempt from EU database registration under Article 49(1)" in s8
+
+    steps = report["compliance_summary"]["next_steps"]
+    assert not any("Article 49" in s for s in steps)
+
+
+def test_annex_iii_non_critical_infrastructure_requires_article_49_registration() -> None:
+    """Annex III systems outside point 2 require Article 49 registration."""
+    engine = ComplianceEngine()
+    descriptor = _descriptor(**ANNEX_III)
+    classification = engine.classify(descriptor)
+
+    assert classification.risk_category is RiskCategory.HIGH
+    assert requires_article49_registration(classification)
+    assert "EU database registration required before deployment" in classification.justification
+
+    report = engine.run(descriptor)
+    s8 = report["tech_doc"]["sections"]["8_conformity_declaration"]
+    assert "Annex VI (Internal Control)" in s8
+    assert "EU Database Registration: PENDING - required before deployment (Article 49)" in s8
+
+    steps = report["compliance_summary"]["next_steps"]
+    assert any("Register system in EU AI Act database (Article 49)" in s for s in steps)
+
+
+def test_dual_annex_i_and_annex_iii_preserves_both_procedures_and_registration() -> None:
+    """A system covered under both Annex I and Annex III reflects both bases."""
+    engine = ComplianceEngine()
+    descriptor = _descriptor(**ANNEX_I, **ANNEX_III)
+    classification = engine.classify(descriptor)
+
+    assert classification.risk_category is RiskCategory.HIGH
+    assert requires_article49_registration(classification)
+
+    report = engine.run(descriptor)
+    s8 = report["tech_doc"]["sections"]["8_conformity_declaration"]
+    assert "Annex I, Section A (Article 43(3))" in s8
+    assert "Annex III basis: Annex VI (Internal Control)" in s8
+    assert "EU Database Registration: PENDING - required before deployment (Article 49)" in s8
+
+    steps = report["compliance_summary"]["next_steps"]
+    assert any("Register system in EU AI Act database (Article 49)" in s for s in steps)
 
 
 # ---------------------------------------------------------------------------
