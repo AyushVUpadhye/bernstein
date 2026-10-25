@@ -355,7 +355,7 @@ def test_concurrent_seal_before_verifier_snapshot_reports_no_negative_tile_count
     def _seal_then_verify(self: AuditLog, *args: Any, **kwargs: Any) -> Any:
         if not sealed_mid_run:
             sealed_mid_run.append(True)
-            _append(audit_dir, key, day="2026-10-25", count=2)
+            _append(audit_dir, key, day="2099-01-01", count=2)
             _seal(audit_dir, key)
         return real_verify(self, *args, **kwargs)
 
@@ -394,7 +394,7 @@ def test_concurrent_seal_with_existing_orphan_retains_orphan_report(
     def _seal_then_verify(self: AuditLog, *args: Any, **kwargs: Any) -> Any:
         if not sealed_mid_run:
             sealed_mid_run.append(True)
-            _append(audit_dir, key, day="2026-10-25", count=2)
+            _append(audit_dir, key, day="2099-01-01", count=2)
             _seal(audit_dir, key)
         return real_verify(self, *args, **kwargs)
 
@@ -408,3 +408,26 @@ def test_concurrent_seal_with_existing_orphan_retains_orphan_report(
     assert "1 tile(s) name no segment in the audit log and were not judged." in result.output
     assert "Hash Tile Verification Passed" in result.output
     assert "Audit Verification: PASSED" in result.output
+
+
+def test_an_empty_log_with_published_tiles_reports_all_tiles_as_unmatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty audit log with published tiles reports all of them as unmatched."""
+    key_path = tmp_path / "audit.key"
+    monkeypatch.setenv(AUDIT_KEY_ENV, str(key_path))
+    monkeypatch.chdir(tmp_path)
+    load_or_create_audit_key()
+    key_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    audit_dir = tmp_path / ".sdd" / "audit"
+    tiles_dir = audit_dir / "tiles"
+    tiles_dir.mkdir(parents=True)
+    (tiles_dir / "2026-01-01.jsonl.tile").write_bytes(b'{"segment": "2026-01-01.jsonl"}\n')
+    (tiles_dir / "2026-01-02.jsonl.tile").write_bytes(b'{"segment": "2026-01-02.jsonl"}\n')
+
+    result = _run("verify", "--hmac-only")
+    assert result.exit_code == 0, result.output
+    assert "Hash Tiles Not Judged" in result.output
+    assert "2 tile(s) name no segment in the audit log and were not judged." in result.output
+    assert "checked against authenticated segment bytes" not in result.output
