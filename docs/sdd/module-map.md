@@ -8,6 +8,7 @@ Full per-file module map. `AGENTS.md`'s own "Module map" section links here inst
 
 | File                        | Purpose |
 |-----------------------------|---------|
+| `administrative_runs.py`    | Administrative containers projected from the existing authenticated audit chain |
 | `compat_redirect_ledger.py` | Compatibility ledger for legacy ``bernstein.core`` redirects |
 | `credential_scoping.py`     | Agent credential scope minimization for least-privilege API keys |
 | `dataclass_helpers.py`      | Helpers for preserving dataclass instance types through updates |
@@ -107,11 +108,13 @@ Full per-file module map. `AGENTS.md`'s own "Module map" section links here inst
 | `amp.py`                        | Amp CLI adapter |
 | `auggie.py`                     | Auggie (Augment Code) CLI adapter |
 | `autohand.py`                   | Autohand Code CLI adapter |
+| `bandit.py`                     | Deterministic Bandit scanner adapter and SARIF normalization |
 | `base.py`                       | Base adapter for CLI coding agents |
 | `caching_adapter.py`            | Caching wrapper for CLI adapters to enable prompt prefix deduplication and response reuse |
 | `canary.py`                     | Adapter conformance canary matrix (issue #2368) |
 | `capability_profile.py`         | Declarative adapter capability profiles and the profile factory |
 | `charm.py`                      | Charm Crush CLI adapter |
+| `checkov.py`                    | Deterministic Checkov IaC scanner adapter and SARIF normalization |
 | `claude.py`                     | Claude Code CLI adapter |
 | `claude_agents.py`              | Build per-task Claude Code subagent definitions for the --agents flag |
 | `claude_cache_control.py`       | Anthropic API cache-control block builder for the Claude Code adapter |
