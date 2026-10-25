@@ -37,6 +37,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -48,10 +49,13 @@ from bernstein.compliance.eu_ai_act import (
     AI_ACT_DEADLINES,
     AI_ACT_SOURCE,
     AIActObligation,
+    AnnexIIIDomain,
+    ClassificationResult,
     ComplianceEngine,
     RiskCategory,
     SystemDescriptor,
     applicable_obligations,
+    format_ai_act_date,
     requires_article49_registration,
 )
 
@@ -438,3 +442,107 @@ def test_compliance_docs_state_the_dates_with_an_as_of_line_and_the_oj_reference
         assert expected in text
     assert "August 2027 compliance deadline" not in text
     assert "August 2027 deadline" not in text
+
+
+@pytest.mark.parametrize(
+    "domain_flag",
+    [
+        "processes_biometrics",
+        "used_in_education",
+        "used_in_employment",
+        "used_in_essential_services",
+        "used_in_law_enforcement",
+        "used_in_migration",
+        "used_in_justice",
+    ],
+)
+@pytest.mark.parametrize("with_annex_i", [False, True])
+def test_critical_infrastructure_plus_other_annex_iii_preserves_registration(
+    domain_flag: str, with_annex_i: bool
+) -> None:
+    """Continuation matrix items 3 & 4: critical infrastructure combined with any other
+
+    Annex III domain retains the Article 49 registration requirement across all three
+    output sites (justification, next steps, and Section 8), while preserving the
+    representative domain and classification hash.
+    """
+    engine = ComplianceEngine()
+    kwargs: dict[str, Any] = {
+        "interacts_with_critical_infrastructure": True,
+        domain_flag: True,
+    }
+    if with_annex_i:
+        kwargs["annex_i_section_a_product"] = True
+
+    descriptor = _descriptor(**kwargs)
+    classification = engine.classify(descriptor)
+
+    assert classification.risk_category is RiskCategory.HIGH
+    assert requires_article49_registration(classification)
+    assert "EU database registration required before deployment" in classification.justification
+
+    expected_domain = (
+        AnnexIIIDomain.BIOMETRIC if domain_flag == "processes_biometrics" else AnnexIIIDomain.CRITICAL_INFRASTRUCTURE
+    )
+    assert classification.annex_iii_domain is expected_domain
+
+    report = engine.run(descriptor)
+    s8 = report["tech_doc"]["sections"]["8_conformity_declaration"]
+    assert "EU Database Registration: PENDING - required before deployment (Article 49)" in s8
+
+    steps = report["compliance_summary"]["next_steps"]
+    assert any("Register system in EU AI Act database (Article 49)" in s for s in steps)
+
+
+def test_article_49_registration_model_contract_and_export_roundtrip() -> None:
+    """Continuation matrix item 6: manual construction and export round trips follow model contract."""
+    c_ci = ClassificationResult(
+        system_name="sys",
+        risk_category=RiskCategory.HIGH,
+        annex_iii_domain=AnnexIIIDomain.CRITICAL_INFRASTRUCTURE,
+        article5_triggers=[],
+        article50_triggers=[],
+        justification="",
+        classified_at="2026-10-25T00:00:00Z",
+        classification_hash="abc",
+    )
+    assert not requires_article49_registration(c_ci)
+
+    c_emp = ClassificationResult(
+        system_name="sys",
+        risk_category=RiskCategory.HIGH,
+        annex_iii_domain=AnnexIIIDomain.EMPLOYMENT,
+        article5_triggers=[],
+        article50_triggers=[],
+        justification="",
+        classified_at="2026-10-25T00:00:00Z",
+        classification_hash="abc",
+    )
+    assert requires_article49_registration(c_emp)
+
+    c_override = ClassificationResult(
+        system_name="sys",
+        risk_category=RiskCategory.HIGH,
+        annex_iii_domain=AnnexIIIDomain.CRITICAL_INFRASTRUCTURE,
+        article5_triggers=[],
+        article50_triggers=[],
+        justification="",
+        classified_at="2026-10-25T00:00:00Z",
+        classification_hash="abc",
+        requires_article49_registration=True,
+    )
+    assert requires_article49_registration(c_override)
+
+    engine = ComplianceEngine()
+    desc = _descriptor(interacts_with_critical_infrastructure=True, used_in_employment=True)
+    report = engine.run(desc)
+    assert report["classification"]["requires_article49_registration"] is True
+
+
+def test_format_ai_act_date_is_locale_independent() -> None:
+    """Official Journal date rendering is English-locked and does not vary by locale."""
+    d = date(2027, 12, 2)
+    assert format_ai_act_date(d) == "2 December 2027"
+
+    d_aug = date(2028, 8, 2)
+    assert format_ai_act_date(d_aug) == "2 August 2028"

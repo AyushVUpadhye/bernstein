@@ -147,9 +147,26 @@ class AIActDeadline:
         }
 
 
+_MONTH_NAMES: tuple[str, ...] = (
+    "",
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
+
 def format_ai_act_date(value: date) -> str:
     """Render a date the way the Official Journal writes it, day month year."""
-    return f"{value.day} {value:%B %Y}"
+    return f"{value.day} {_MONTH_NAMES[value.month]} {value.year}"
 
 
 _TABLE_BEGIN = "# >>> AI Act application dates: the only place they are written"
@@ -357,6 +374,7 @@ class ClassificationResult:
     classified_at: str
     classification_hash: str
     annex_i_section_a_product: bool = False
+    requires_article49_registration: bool | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -614,9 +632,14 @@ class _AnnexIIIClassifier:
                     "under Article 6(1): a safety component of, or itself, a product covered by "
                     "Section A of Annex I that requires third-party conformity assessment."
                 )
+            non_ci_annex_iii = any(
+                getattr(descriptor, attr, False)
+                for attr, domain, _ in self._ANNEX_III_CHECKS
+                if domain != AnnexIIIDomain.CRITICAL_INFRASTRUCTURE
+            )
             registration_phrase = (
                 "CE marking, and EU database registration required before deployment."
-                if annex_iii_domain not in (AnnexIIIDomain.NOT_APPLICABLE, AnnexIIIDomain.CRITICAL_INFRASTRUCTURE)
+                if non_ci_annex_iii
                 else "and CE marking required before deployment."
             )
             justification = (
@@ -662,6 +685,13 @@ class _AnnexIIIClassifier:
         ).encode()
         classification_hash = hashlib.sha256(hash_payload).hexdigest()
 
+        non_ci_annex_iii = any(
+            getattr(descriptor, attr, False)
+            for attr, domain, _ in self._ANNEX_III_CHECKS
+            if domain != AnnexIIIDomain.CRITICAL_INFRASTRUCTURE
+        )
+        requires_registration = risk_category == RiskCategory.HIGH and non_ci_annex_iii
+
         return ClassificationResult(
             system_name=descriptor.name,
             risk_category=risk_category,
@@ -672,6 +702,7 @@ class _AnnexIIIClassifier:
             classified_at=now,
             classification_hash=classification_hash,
             annex_i_section_a_product=descriptor.annex_i_section_a_product,
+            requires_article49_registration=requires_registration,
         )
 
 
@@ -686,6 +717,8 @@ def requires_article49_registration(classification: ClassificationResult) -> boo
     """
     if classification.risk_category != RiskCategory.HIGH:
         return False
+    if classification.requires_article49_registration is not None:
+        return classification.requires_article49_registration
     return classification.annex_iii_domain not in (
         AnnexIIIDomain.NOT_APPLICABLE,
         AnnexIIIDomain.CRITICAL_INFRASTRUCTURE,
@@ -1281,6 +1314,7 @@ class ComplianceEngine:
                 "classified_at": classification.classified_at,
                 "classification_hash": classification.classification_hash,
                 "annex_i_section_a_product": classification.annex_i_section_a_product,
+                "requires_article49_registration": requires_article49_registration(classification),
             }
         }
 

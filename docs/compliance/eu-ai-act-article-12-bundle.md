@@ -33,7 +33,7 @@ Sections 1 to 3 from:
 - **2 December 2027** for systems that are high-risk under Article 6(2) and
   Annex III;
 - **2 August 2028** for systems that are high-risk under Article 6(1) and
-  Annex I (Section A products; for Section B products only the provisions in
+  Annex I (Section A products; for Section B products only the provisions listed in
   Article 2(2) apply).
 
 A high-risk system already on the market before its date is covered only if
