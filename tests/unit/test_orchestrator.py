@@ -7,6 +7,8 @@ import json
 import logging
 import subprocess
 import time
+from collections.abc import Iterator
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -49,6 +51,29 @@ if TYPE_CHECKING:
     from bernstein.core.bulletin import BulletinBoard
 
 # --- Helpers ---
+
+
+@pytest.fixture(autouse=True)
+def _join_test_owned_executors(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Join every real pool this test creates, including a failed initializer's.
+
+    These tests call tick/helpers directly rather than running the production
+    run-loop's drain. Register cleanup at construction so direct constructors
+    and factory calls share ownership. Passed-in clients remain borrowed.
+    """
+    initialize = Orchestrator.__init__
+    with ExitStack() as resources:
+
+        def initialize_owned(self: Orchestrator, *args: Any, **kwargs: Any) -> None:
+            try:
+                initialize(self, *args, **kwargs)
+            finally:
+                executor = getattr(self, "_executor", None)
+                if executor is not None:
+                    resources.callback(executor.shutdown, wait=True, cancel_futures=True)
+
+        monkeypatch.setattr(Orchestrator, "__init__", initialize_owned)
+        yield
 
 
 def _make_task(
@@ -7030,3 +7055,15 @@ class TestCostPolicyDispatchWiring:
 
         assert result.cost_dispatch_halt is None
         assert len(result.spawned) == 1
+
+
+def test_administrative_members_are_not_spawned(tmp_path: Path) -> None:
+    """Manual container members stay claimable without automatic agent creation."""
+    task = _make_task(id="T-manual")
+    task.metadata["administrative_run_id"] = "admin-" + "a" * 32
+    transport = _mock_transport({"GET /tasks?status=open": httpx.Response(200, json=[task.to_dict()])})
+    adapter = _mock_adapter()
+    orch = _build_orchestrator(tmp_path, transport, adapter=adapter)
+    result = orch.tick()
+    assert result.spawned == []
+    adapter.spawn.assert_not_called()
